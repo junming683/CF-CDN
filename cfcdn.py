@@ -14,6 +14,8 @@ import subprocess
 import concurrent.futures
 
 OUTPUT_FILE = "CDNym.txt"
+OUTPUT_CLEAN_FILE = "CDNym_clean.txt"
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DOMAIN_FILE = os.path.join(SCRIPT_DIR, "domains.txt")
 
@@ -144,20 +146,28 @@ def main():
     results.sort(key=lambda x: x[0])
     
     current_out = os.path.join(os.getcwd(), OUTPUT_FILE)
+    current_clean_out = os.path.join(os.getcwd(), OUTPUT_CLEAN_FILE)
     
     print("\n" + "-" * 50)
-    print(f"排序结果已保存到主目录文件: {OUTPUT_FILE}, 内容如下")
-    print(", 选择延迟低的域名替换客户端地址")
+    print("排序结果已保存:")
+    print(f"  1. 完整格式 (带延迟): {OUTPUT_FILE}")
+    print(f"  2. 纯域名格式 (无前缀): {OUTPUT_CLEAN_FILE}")
+    print("选择延迟低的域名替换客户端地址")
     print("-" * 50 + "\n")
     
     out_lines = []
+    clean_lines = []
     for avg, domain in results:
         line = f"{avg:.3f} ms: {domain}"
         print(line)
         out_lines.append(line + "\n")
+        clean_lines.append(domain + "\n")
         
     with open(current_out, "w", encoding="utf-8") as f:
         f.writelines(out_lines)
+
+    with open(current_clean_out, "w", encoding="utf-8") as f:
+        f.writelines(clean_lines)
 
 if __name__ == "__main__":
     main()
