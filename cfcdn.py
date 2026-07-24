@@ -145,29 +145,33 @@ def main():
                 
     results.sort(key=lambda x: x[0])
     
-    current_out = os.path.join(os.getcwd(), OUTPUT_FILE)
-    current_clean_out = os.path.join(os.getcwd(), OUTPUT_CLEAN_FILE)
+    current_out = os.path.abspath(OUTPUT_FILE)
+    current_clean_out = os.path.abspath(OUTPUT_CLEAN_FILE)
     
-    print("\n" + "-" * 50)
-    print("排序结果已保存:")
-    print(f"  1. 完整格式 (带延迟): {OUTPUT_FILE}")
-    print(f"  2. 纯域名格式 (无前缀): {OUTPUT_CLEAN_FILE}")
-    print("选择延迟低的域名替换客户端地址")
-    print("-" * 50 + "\n")
+    print("\n" + "=" * 50)
+    print(" 排序结果已完成（纯域名直复制版本）：")
+    print("=" * 50)
     
     out_lines = []
     clean_lines = []
     for avg, domain in results:
-        line = f"{avg:.3f} ms: {domain}"
-        print(line)
-        out_lines.append(line + "\n")
-        clean_lines.append(domain + "\n")
+        # 直接在屏幕打印纯域名，方便长按选择复制
+        print(domain)
+        out_lines.append(f"{avg:.3f} ms: {domain}\n")
+        clean_lines.append(f"{domain}\n")
         
     with open(current_out, "w", encoding="utf-8") as f:
         f.writelines(out_lines)
 
     with open(current_clean_out, "w", encoding="utf-8") as f:
         f.writelines(clean_lines)
+
+    print("\n" + "-" * 50)
+    print(" 提示: 上方已输出纯域名列表，可直接长按复制！")
+    print(" 文件保存完整路径如下:")
+    print(f"  📌 纯域名文件: {current_clean_out}")
+    print(f"  📌 带延迟文件: {current_out}")
+    print("-" * 50 + "\n")
 
 if __name__ == "__main__":
     main()
