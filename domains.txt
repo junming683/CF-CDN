@@ -1,0 +1,59 @@
+# === 1. 企业级/高优先级线路 ===
+shopify.com
+www.shopify.com
+www.visa.com
+www.visa.co.jp
+www.visa.com.sg
+www.visa.com.hk
+www.visa.com.tw
+www.visakorea.com
+www.okcupid.com
+www.udacity.com
+www.udemy.com
+www.digitalocean.com
+www.glassdoor.com
+
+# === 2. Cloudflare 官方及基础设施节点 ===
+time.cloudflare.com
+cloudflare.com
+dash.cloudflare.com
+developers.cloudflare.com
+community.cloudflare.com
+blog.cloudflare.com
+pages.dev
+workers.dev
+
+# === 3. IP/网络工具类 ===
+ip.sb
+time.is
+iplocation.io
+www.iplocation.net
+whatismyipaddress.com
+www.whatismyip.com
+www.whoer.net
+www.ipchicken.com
+download.yunzhongzhuan.com
+
+# === 4. 区域路由节点 ===
+singapore.com
+japan.com
+russia.com
+malaysia.com
+icook.hk
+icook.tw
+fbi.gov
+www.who.int
+www.wto.org
+www.gov.ua
+gur.gov.ua
+www.zsu.gov.ua
+www.gco.gov.qa
+
+# === 5. 社区常用及第三方优选域名 ===
+skk.moe
+www.baipiao.eu.org
+log.bpminecraft.com
+www.pcmag.com
+www.boba88slot.com
+www.hugedomains.com
+cf.090227.xyz
