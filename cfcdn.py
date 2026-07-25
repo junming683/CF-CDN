@@ -22,7 +22,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DOMAIN_FILE = os.path.join(SCRIPT_DIR, "domains.txt")
 
 DEFAULT_DOMAINS = """
-# === 1. 企业级/高优先级线路 ===
+# === 1. 顶级企业级独享节点 ===
 shopify.com
 www.shopify.com
 www.visa.com
@@ -31,25 +31,34 @@ www.visa.com.sg
 www.visa.com.hk
 www.visa.com.tw
 www.visakorea.com
-www.okcupid.com
-www.udacity.com
-www.udemy.com
-www.digitalocean.com
-www.glassdoor.com
-
-# === 2. Cloudflare 官方及基础设施节点 ===
-time.cloudflare.com
-cloudflare.com
+speed.cloudflare.com
+www.cloudflare.com
 dash.cloudflare.com
 developers.cloudflare.com
 community.cloudflare.com
 blog.cloudflare.com
 pages.dev
 workers.dev
+www.digitalocean.com
+www.glassdoor.com
+www.udemy.com
+www.udacity.com
+www.okcupid.com
+www.behance.net
+www.vimeo.com
 
-# === 3. IP/网络工具类 ===
+# === 2. 移动/香港/东南亚直连优化节点 ===
+icook.hk
+icook.tw
 ip.sb
 time.is
+singapore.com
+japan.com
+malaysia.com
+russia.com
+skk.moe
+
+# === 3. 网络工具与公共服务节点 ===
 iplocation.io
 www.iplocation.net
 whatismyipaddress.com
@@ -57,14 +66,6 @@ www.whatismyip.com
 www.whoer.net
 www.ipchicken.com
 download.yunzhongzhuan.com
-
-# === 4. 区域路由节点 ===
-singapore.com
-japan.com
-russia.com
-malaysia.com
-icook.hk
-icook.tw
 fbi.gov
 www.who.int
 www.wto.org
@@ -73,14 +74,13 @@ gur.gov.ua
 www.zsu.gov.ua
 www.gco.gov.qa
 
-# === 5. 社区常用及第三方优选域名 ===
-skk.moe
-www.baipiao.eu.org
+# === 4. 社区动态维护优选 CNAME/IP ===
+cf.090227.xyz
 log.bpminecraft.com
 www.pcmag.com
 www.boba88slot.com
 www.hugedomains.com
-cf.090227.xyz
+www.baipiao.eu.org
 """
 
 def init_domain_file():
@@ -100,9 +100,7 @@ def load_domains():
     return domains
 
 def ping_domain(domain):
-    """底层调用系统 ping 发送 3 个包，解析 min/avg/max 中的 avg (平均延迟)"""
     is_win = platform.system().lower() == "windows"
-    # -c 3 (Linux/Termux) 或 -n 3 (Windows) 表示真实发送 3 次 ping 数据包
     cmd = ["ping", "-n" if is_win else "-c", "3", domain]
     
     try:
@@ -191,15 +189,21 @@ def main():
         print(f"正在测试 {domain:<30} 实际下载速度...", end="", flush=True)
         speed = test_download_speed(domain, duration=2.5)
         print(f" -> {speed:.2f} MB/s (3次Ping平均: {avg:.1f}ms)")
-        final_results.append((speed, avg, domain))
-        
+        if speed > 0.0:
+            final_results.append((speed, avg, domain))
+            
+    if not final_results:
+        print("\n[!] 提示: 未测得有效下载速度的节点 (可能由于连接限制)，请稍后再试。")
+        return
+
+    # 严格按照【实际下载速度】由高到低降序排序
     final_results.sort(key=lambda x: (-x[0], x[1]))
     
     current_out = os.path.abspath(OUTPUT_FILE)
     current_clean_out = os.path.abspath(OUTPUT_CLEAN_FILE)
     
     print("\n" + "=" * 50)
-    print(" 🏆 最终优选排序结果 (按真实下载速度降序):")
+    print(" 🏆 最终优选排序结果 (已过滤 0 MB/s 节点，仅保留有效高速域名):")
     print("=" * 50)
     
     out_lines = []
@@ -208,12 +212,6 @@ def main():
         print(domain)
         out_lines.append(f"{speed:.2f} MB/s | {avg:.1f} ms: {domain}\n")
         clean_lines.append(f"{domain}\n")
-        
-    tested_domains = {r[2] for r in final_results}
-    for avg, domain in ping_results:
-        if domain not in tested_domains:
-            out_lines.append(f"0.00 MB/s | {avg:.1f} ms: {domain}\n")
-            clean_lines.append(f"{domain}\n")
 
     with open(current_out, "w", encoding="utf-8") as f:
         f.writelines(out_lines)
@@ -222,7 +220,7 @@ def main():
         f.writelines(clean_lines)
 
     print("\n" + "-" * 50)
-    print(" 提示: 上方已按【下载速度】选出最佳纯域名，可直接长按复制！")
+    print(f" 提示: 已从上百节点中为您精选出 {len(final_results)} 个【有效可用】的纯域名，可直接长按复制！")
     print(" 文件保存完整路径如下:")
     print(f"  📌 纯域名文件: {current_clean_out}")
     print(f"  📌 详细速度文件: {current_out}")
