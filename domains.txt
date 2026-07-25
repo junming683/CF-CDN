@@ -1,4 +1,4 @@
-# === 1. 企业级/高优先级线路 ===
+# === 1. 顶级企业级独享节点 (推荐电信/联通/大带宽用户) ===
 shopify.com
 www.shopify.com
 www.visa.com
@@ -7,25 +7,34 @@ www.visa.com.sg
 www.visa.com.hk
 www.visa.com.tw
 www.visakorea.com
-www.okcupid.com
-www.udacity.com
-www.udemy.com
-www.digitalocean.com
-www.glassdoor.com
-
-# === 2. Cloudflare 官方及基础设施节点 ===
-time.cloudflare.com
-cloudflare.com
+speed.cloudflare.com
+www.cloudflare.com
 dash.cloudflare.com
 developers.cloudflare.com
 community.cloudflare.com
 blog.cloudflare.com
 pages.dev
 workers.dev
+www.digitalocean.com
+www.glassdoor.com
+www.udemy.com
+www.udacity.com
+www.okcupid.com
+www.behance.net
+www.vimeo.com
 
-# === 3. IP/网络工具类 ===
+# === 2. 移动/香港/东南亚直连优化节点 (推荐移动用户) ===
+icook.hk
+icook.tw
 ip.sb
 time.is
+singapore.com
+japan.com
+malaysia.com
+russia.com
+skk.moe
+
+# === 3. 网络工具与公共服务节点 ===
 iplocation.io
 www.iplocation.net
 whatismyipaddress.com
@@ -33,14 +42,6 @@ www.whatismyip.com
 www.whoer.net
 www.ipchicken.com
 download.yunzhongzhuan.com
-
-# === 4. 区域路由节点 ===
-singapore.com
-japan.com
-russia.com
-malaysia.com
-icook.hk
-icook.tw
 fbi.gov
 www.who.int
 www.wto.org
@@ -49,11 +50,10 @@ gur.gov.ua
 www.zsu.gov.ua
 www.gco.gov.qa
 
-# === 5. 社区常用及第三方优选域名 ===
-skk.moe
-www.baipiao.eu.org
+# === 4. 社区动态维护优选 CNAME/IP ===
+cf.090227.xyz
 log.bpminecraft.com
 www.pcmag.com
 www.boba88slot.com
 www.hugedomains.com
-cf.090227.xyz
+www.baipiao.eu.org
