@@ -4,7 +4,7 @@
 """
 CF-CDN 域名/IP 延迟与真实下载带宽双重测速工具
 支持 Android Termux / Linux / macOS / Windows
-自动支持 IPv4, IPv6 与 域名测速
+自动支持 IPv4, IPv6 与 域名并发高吞吐测速
 """
 
 import os
@@ -37,9 +37,8 @@ def load_domains():
 def ping_domain(domain):
     """底层调用系统 ping 发送 3 个包，解析 min/avg/max 中的 avg (平均延迟)"""
     is_win = platform.system().lower() == "windows"
-    
-    # 判断是否为 IPv6 地址
     is_ipv6 = ":" in domain
+    
     if is_win:
         cmd = ["ping", "-6" if is_ipv6 else "-4", "-n", "3", domain]
     else:
@@ -72,13 +71,17 @@ def ping_domain(domain):
     print(f"[Ping 测试] {domain:<35} 超时/失败")
     return None
 
-def test_download_speed(domain, duration=3):
-    """测试真实的 HTTP/HTTPS 下载速度 (MB/s)"""
+def test_download_speed_single(item, duration=2.5):
+    """单节点 HTTP/HTTPS 下载测速"""
+    avg, domain = item
     target = f"[{domain}]" if ":" in domain and not domain.startswith("[") else domain
     url = f"https://{target}/"
     req = urllib.request.Request(
         url, 
-        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept-Encoding": "identity"
+        }
     )
     
     start_time = time.time()
@@ -86,7 +89,7 @@ def test_download_speed(domain, duration=3):
     try:
         with urllib.request.urlopen(req, timeout=duration + 2) as response:
             while True:
-                chunk = response.read(32 * 1024)
+                chunk = response.read(64 * 1024)
                 if not chunk:
                     break
                 downloaded += len(chunk)
@@ -95,10 +98,14 @@ def test_download_speed(domain, duration=3):
         elapsed = time.time() - start_time
         if elapsed > 0 and downloaded > 0:
             speed_mbs = (downloaded / (1024 * 1024)) / elapsed
-            return round(speed_mbs, 2)
+            res_speed = round(speed_mbs, 2)
+            print(f"[下载测速] {domain:<35} -> {res_speed:.2f} MB/s (Ping: {avg:.1f}ms)")
+            return (res_speed, avg, domain)
     except Exception:
         pass
-    return 0.0
+        
+    print(f"[下载测速] {domain:<35} -> 0.00 MB/s (不可用/超时)")
+    return (0.0, avg, domain)
 
 def main():
     domains = load_domains()
@@ -108,7 +115,7 @@ def main():
     print(" 阶段一：正在并发测试 3 次 Ping 延迟 (取平均值)......\n")
     
     ping_results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
         futures = [executor.submit(ping_domain, domain) for domain in domains]
         for future in concurrent.futures.as_completed(futures):
             res = future.result()
@@ -121,19 +128,21 @@ def main():
         
     ping_results.sort(key=lambda x: x[0])
     
-    top_candidates = ping_results[:15]
+    # 扩大测速范围：截取前 35 个低延迟候选节点进行 HTTP 真实下载带宽测试
+    top_candidates = ping_results[:35]
     
     print("\n" + "=" * 50)
-    print(" 阶段二：正在对低延迟节点进行真实下载速度测速 (MB/s)......")
+    print(f" 阶段二：正在对前 {len(top_candidates)} 个低延迟节点进行并发真实下载测速 (MB/s)......")
     print("=" * 50 + "\n")
     
     final_results = []
-    for avg, domain in top_candidates:
-        print(f"正在测试 {domain:<35} 实际下载速度...", end="", flush=True)
-        speed = test_download_speed(domain, duration=2.5)
-        print(f" -> {speed:.2f} MB/s (3次Ping平均: {avg:.1f}ms)")
-        if speed > 0.0:
-            final_results.append((speed, avg, domain))
+    # 阶段二采用 8 线程并发测速，大大缩短 35 个节点的整体测速耗时
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [executor.submit(test_download_speed_single, item) for item in top_candidates]
+        for future in concurrent.futures.as_completed(futures):
+            speed, avg, domain = future.result()
+            if speed > 0.0:
+                final_results.append((speed, avg, domain))
             
     if not final_results:
         print("\n[!] 提示: 暂未测得有效 HTTP 下载速度的节点，请稍后再试。")
@@ -146,13 +155,13 @@ def main():
     current_clean_out = os.path.abspath(OUTPUT_CLEAN_FILE)
     
     print("\n" + "=" * 50)
-    print(" 🏆 最终优选排序结果 (已过滤 0 MB/s 节点，仅保留有效高速节点/域名):")
+    print(f" 🏆 最终优选排序结果 (精选出 {len(final_results)} 个有效高速节点/域名):")
     print("=" * 50)
     
     out_lines = []
     clean_lines = []
     for speed, avg, domain in final_results:
-        print(domain)
+        print(f"{domain:<35} (速度: {speed:.2f} MB/s | Ping: {avg:.1f}ms)")
         out_lines.append(f"{speed:.2f} MB/s | {avg:.1f} ms: {domain}\n")
         clean_lines.append(f"{domain}\n")
 
@@ -163,7 +172,7 @@ def main():
         f.writelines(clean_lines)
 
     print("\n" + "-" * 50)
-    print(f" 提示: 已为您精选出 {len(final_results)} 个【有效可用】的节点，可直接长按复制！")
+    print(f" 提示: 已为您精选出 {len(final_results)} 个【有效可用】的高速节点，可直接长按复制！")
     print(" 文件保存完整路径如下:")
     print(f"  📌 纯节点/域名文件: {current_clean_out}")
     print(f"  📌 详细速度文件: {current_out}")
