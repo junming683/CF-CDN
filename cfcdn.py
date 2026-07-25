@@ -100,7 +100,9 @@ def load_domains():
     return domains
 
 def ping_domain(domain):
+    """底层调用系统 ping 发送 3 个包，解析 min/avg/max 中的 avg (平均延迟)"""
     is_win = platform.system().lower() == "windows"
+    # -c 3 (Linux/Termux) 或 -n 3 (Windows) 表示真实发送 3 次 ping 数据包
     cmd = ["ping", "-n" if is_win else "-c", "3", domain]
     
     try:
@@ -111,18 +113,18 @@ def ping_domain(domain):
             match = re.search(r'(?:平均|Average)\s*=\s*(\d+)ms', output)
             if match:
                 avg = float(match.group(1))
-                print(f"[Ping 测试] {domain:<30} 延迟: {avg:.1f} ms")
+                print(f"[Ping 测试] {domain:<30} 3次平均延迟: {avg:.1f} ms")
                 return (avg, domain)
         else:
             match = re.search(r'rtt min/avg/max/[^=]+=\s*[\d\.]+/([\d\.]+)/', output)
             if match:
                 avg = float(match.group(1))
-                print(f"[Ping 测试] {domain:<30} 延迟: {avg:.1f} ms")
+                print(f"[Ping 测试] {domain:<30} 3次平均延迟: {avg:.1f} ms")
                 return (avg, domain)
             match_alt = re.search(r'round-trip min/avg/max = [\d\.]+/([\d\.]+)/', output)
             if match_alt:
                 avg = float(match_alt.group(1))
-                print(f"[Ping 测试] {domain:<30} 延迟: {avg:.1f} ms")
+                print(f"[Ping 测试] {domain:<30} 3次平均延迟: {avg:.1f} ms")
                 return (avg, domain)
     except Exception:
         pass
@@ -162,7 +164,7 @@ def main():
     print("==================================================")
     print(f" 🚀 CF-CDN 域名/IP 真·测速工具 (共收录 {len(domains)} 个节点)")
     print("==================================================")
-    print(" 阶段一：正在并发测试 Ping 延迟......\n")
+    print(" 阶段一：正在并发测试 3 次 Ping 延迟 (取平均值)......\n")
     
     ping_results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
@@ -178,7 +180,6 @@ def main():
         
     ping_results.sort(key=lambda x: x[0])
     
-    # 挑选延迟最低的前 12 个域名进行真实下载速度测试
     top_candidates = ping_results[:12]
     
     print("\n" + "=" * 50)
@@ -189,10 +190,9 @@ def main():
     for avg, domain in top_candidates:
         print(f"正在测试 {domain:<30} 实际下载速度...", end="", flush=True)
         speed = test_download_speed(domain, duration=2.5)
-        print(f" -> {speed:.2f} MB/s (Ping: {avg:.1f}ms)")
+        print(f" -> {speed:.2f} MB/s (3次Ping平均: {avg:.1f}ms)")
         final_results.append((speed, avg, domain))
         
-    # 按实际下载速度优先降序，其次按 Ping 延迟升序
     final_results.sort(key=lambda x: (-x[0], x[1]))
     
     current_out = os.path.abspath(OUTPUT_FILE)
@@ -205,12 +205,10 @@ def main():
     out_lines = []
     clean_lines = []
     for speed, avg, domain in final_results:
-        # 直接输出纯域名，方便复制
         print(domain)
         out_lines.append(f"{speed:.2f} MB/s | {avg:.1f} ms: {domain}\n")
         clean_lines.append(f"{domain}\n")
         
-    # 补全剩下的未测下载速度但 Ping 成功的节点
     tested_domains = {r[2] for r in final_results}
     for avg, domain in ping_results:
         if domain not in tested_domains:
