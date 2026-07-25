@@ -115,7 +115,7 @@ www.zsu.gov.ua
 www.gco.gov.qa
 
 # === 4. 社区动态维护优选 CNAME/IP ===
-alist.042499.xyz
+game.junmingxx.dpdns.org
 log.bpminecraft.com
 www.pcmag.com
 www.boba88slot.com
