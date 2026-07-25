@@ -128,7 +128,6 @@ def main():
         
     ping_results.sort(key=lambda x: x[0])
     
-    # 扩大测速范围：截取前 35 个低延迟候选节点进行 HTTP 真实下载带宽测试
     top_candidates = ping_results[:35]
     
     print("\n" + "=" * 50)
@@ -136,7 +135,6 @@ def main():
     print("=" * 50 + "\n")
     
     final_results = []
-    # 阶段二采用 8 线程并发测速，大大缩短 35 个节点的整体测速耗时
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         futures = [executor.submit(test_download_speed_single, item) for item in top_candidates]
         for future in concurrent.futures.as_completed(futures):
@@ -154,16 +152,27 @@ def main():
     current_out = os.path.abspath(OUTPUT_FILE)
     current_clean_out = os.path.abspath(OUTPUT_CLEAN_FILE)
     
+    # --- 第一部分：详细参数对比视图 ---
     print("\n" + "=" * 50)
-    print(f" 🏆 最终优选排序结果 (精选出 {len(final_results)} 个有效高速节点/域名):")
+    print(" 📊 测速结果详细数据 (速度与延迟):")
     print("=" * 50)
+    for speed, avg, domain in final_results:
+        print(f"  {domain:<35} | 速度: {speed:5.2f} MB/s | 延迟: {avg:5.1f} ms")
+
+    # --- 第二部分：专属直复制区域 (完全无任何多余后缀，格式完美匹配图二) ---
+    print("\n" + "=" * 50)
+    print(f" 📋 纯域名/IP 直复制区域 (共 {len(final_results)} 个高速可用节点):")
+    print("==================================================")
     
     out_lines = []
     clean_lines = []
     for speed, avg, domain in final_results:
-        print(f"{domain:<35} (速度: {speed:.2f} MB/s | Ping: {avg:.1f}ms)")
+        # 直接打印干净纯粹的域名/IP，绝无任何后缀干扰！
+        print(domain)
         out_lines.append(f"{speed:.2f} MB/s | {avg:.1f} ms: {domain}\n")
         clean_lines.append(f"{domain}\n")
+
+    print("==================================================")
 
     with open(current_out, "w", encoding="utf-8") as f:
         f.writelines(out_lines)
@@ -172,9 +181,9 @@ def main():
         f.writelines(clean_lines)
 
     print("\n" + "-" * 50)
-    print(f" 提示: 已为您精选出 {len(final_results)} 个【有效可用】的高速节点，可直接长按复制！")
+    print(" 💡 提示: 直接长按框选【纯域名/IP 直复制区域】即可一键复制！")
     print(" 文件保存完整路径如下:")
-    print(f"  📌 纯节点/域名文件: {current_clean_out}")
+    print(f"  📌 纯节点文件: {current_clean_out}")
     print(f"  📌 详细速度文件: {current_out}")
     print("-" * 50 + "\n")
 
