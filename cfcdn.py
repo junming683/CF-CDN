@@ -159,7 +159,7 @@ def main():
     for speed, avg, domain in final_results:
         print(f"  {domain:<35} | 速度: {speed:5.2f} MB/s | 延迟: {avg:5.1f} ms")
 
-    # --- 第二部分：专属直复制区域 (完全无任何多余后缀，格式完美匹配图二) ---
+    # --- 第二部分：专属直复制区域 ---
     print("\n" + "=" * 50)
     print(f" 📋 纯域名/IP 直复制区域 (共 {len(final_results)} 个高速可用节点):")
     print("==================================================")
@@ -167,7 +167,6 @@ def main():
     out_lines = []
     clean_lines = []
     for speed, avg, domain in final_results:
-        # 直接打印干净纯粹的域名/IP，绝无任何后缀干扰！
         print(domain)
         out_lines.append(f"{speed:.2f} MB/s | {avg:.1f} ms: {domain}\n")
         clean_lines.append(f"{domain}\n")
