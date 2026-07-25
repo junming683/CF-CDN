@@ -4,7 +4,7 @@
 """
 CF-CDN 域名/IP 延迟与真实下载带宽双重测速工具
 支持 Android Termux / Linux / macOS / Windows
-自动支持 IPv4, IPv6 与 域名并发高吞吐测速
+自动支持 IPv4, IPv6, 域名与在线 API 动态拉取测速
 """
 
 import os
@@ -22,16 +22,49 @@ OUTPUT_CLEAN_FILE = "CDNym_clean.txt"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DOMAIN_FILE = os.path.join(SCRIPT_DIR, "domains.txt")
 
+def fetch_online_api_ips():
+    """尝试从电信/联通/移动 API 接口获取最新动态优选 IP"""
+    api_urls = [
+        "https://cf.090227.xyz/ct?ips=5",
+        "https://cf.090227.xyz/cu?ips=5",
+        "https://cf.090227.xyz/cmcc?ips=5",
+    ]
+    online_ips = []
+    print("[+] 正在尝试自动在线获取三网最新动态优选 IP......")
+    for url in api_urls:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                content = resp.read().decode('utf-8')
+                for line in content.splitlines():
+                    ip = line.strip()
+                    if ip and re.match(r'^\d+\.\d+\.\d+\.\d+$', ip):
+                        online_ips.append(ip)
+        except Exception:
+            pass
+            
+    if online_ips:
+        print(f"[✔] 成功自动获取 {len(online_ips)} 个在线实时优选 IP！")
+    else:
+        print("[-] 在线 API 接口暂不可用，使用本地全量域名/IP 库进行测试。")
+    return online_ips
+
 def load_domains():
     if not os.path.exists(DOMAIN_FILE):
         print(f"[错误] 未找到域名配置文件: {DOMAIN_FILE}")
         return []
     domains = []
+    
+    # 尝试拉取在线 API 实时 IP
+    online_ips = fetch_online_api_ips()
+    domains.extend(online_ips)
+    
     with open(DOMAIN_FILE, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line and not line.startswith("#"):
-                domains.append(line)
+                if line not in domains:
+                    domains.append(line)
     return domains
 
 def ping_domain(domain):
@@ -152,14 +185,12 @@ def main():
     current_out = os.path.abspath(OUTPUT_FILE)
     current_clean_out = os.path.abspath(OUTPUT_CLEAN_FILE)
     
-    # --- 第一部分：详细参数对比视图 ---
     print("\n" + "=" * 50)
     print(" 📊 测速结果详细数据 (速度与延迟):")
     print("=" * 50)
     for speed, avg, domain in final_results:
         print(f"  {domain:<35} | 速度: {speed:5.2f} MB/s | 延迟: {avg:5.1f} ms")
 
-    # --- 第二部分：专属直复制区域 (完全无任何多余后缀，格式完美匹配图二) ---
     print("\n" + "=" * 50)
     print(f" 📋 纯域名/IP 直复制区域 (共 {len(final_results)} 个高速可用节点):")
     print("==================================================")
@@ -167,7 +198,6 @@ def main():
     out_lines = []
     clean_lines = []
     for speed, avg, domain in final_results:
-        # 直接打印干净纯粹的域名/IP，绝无任何后缀干扰！
         print(domain)
         out_lines.append(f"{speed:.2f} MB/s | {avg:.1f} ms: {domain}\n")
         clean_lines.append(f"{domain}\n")

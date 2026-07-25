@@ -1,9 +1,31 @@
+# === 来自用户整理提供的推荐优选域名列表 ===
+game.junmingxx.dpdns.org
+cf.tencentapp.cn
+cloudflare-dl.byoip.top
+cf.877774.xyz
+www.visa.cn
+mfa.gov.ua
+store.ubi.com
+staticdelivery.nexusmods.com
+bestcf.030101.xyz
+cloudflare.182682.xyz
+cdn.2020111.xyz
+cdns.doon.eu.org
+cf.0sm.com
+cf.877771.xyz
+cf.900501.xyz
+cfip.1323123.xyz
+cfip.cfcdn.vip
+cloudflare-ip.mofashi.ltd
+fn.130519.xyz
+freeyx.cloudflare88.eu.org
+nrtcfdns.zone.id
+xn--b6gac.eu.org
+777.ai7777777.xyz
+
 # === 来自截图提取的优选域名与 IP (已去除端口并去重) ===
-# --- 优选域名 ---
 saas.sin.fan
 jy.junming99.dpdns.org
-
-# --- 优选 IPv4 地址 ---
 104.17.143.229
 104.17.115.227
 104.17.59.37
@@ -20,8 +42,6 @@ jy.junming99.dpdns.org
 104.17.70.19
 8.220.134.136
 38.246.73.124
-
-# --- 优选 IPv6 地址 ---
 2606:4700:29::6871:c341
 2606:4700:26::faea:dec8
 2606:4700:1a::3fcd:4b4e
@@ -36,7 +56,7 @@ jy.junming99.dpdns.org
 2606:4700:9ae1::3c8:2c6
 2606:4700:99e0::9c8:f021
 
-# === Cloudflare 官方经典 IP 段精选采样 (纯 IP 优选库) ===
+# === Cloudflare 官方经典 IP 段精选采样 ===
 104.16.160.1
 104.17.160.1
 104.18.160.1
@@ -113,11 +133,3 @@ www.gov.ua
 gur.gov.ua
 www.zsu.gov.ua
 www.gco.gov.qa
-
-# === 4. 社区动态维护优选 CNAME/IP ===
-game.junmingxx.dpdns.org
-log.bpminecraft.com
-www.pcmag.com
-www.boba88slot.com
-www.hugedomains.com
-www.baipiao.eu.org
