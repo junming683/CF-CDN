@@ -4,6 +4,7 @@
 """
 CF-CDN 域名/IP 延迟与真实下载带宽双重测速工具
 支持 Android Termux / Linux / macOS / Windows
+自动支持 IPv4, IPv6 与 域名测速
 """
 
 import os
@@ -21,76 +22,10 @@ OUTPUT_CLEAN_FILE = "CDNym_clean.txt"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DOMAIN_FILE = os.path.join(SCRIPT_DIR, "domains.txt")
 
-DEFAULT_DOMAINS = """
-# === 1. 顶级企业级独享节点 ===
-shopify.com
-www.shopify.com
-www.visa.com
-www.visa.co.jp
-www.visa.com.sg
-www.visa.com.hk
-www.visa.com.tw
-www.visakorea.com
-speed.cloudflare.com
-www.cloudflare.com
-dash.cloudflare.com
-developers.cloudflare.com
-community.cloudflare.com
-blog.cloudflare.com
-pages.dev
-workers.dev
-www.digitalocean.com
-www.glassdoor.com
-www.udemy.com
-www.udacity.com
-www.okcupid.com
-www.behance.net
-www.vimeo.com
-
-# === 2. 移动/香港/东南亚直连优化节点 ===
-icook.hk
-icook.tw
-ip.sb
-time.is
-singapore.com
-japan.com
-malaysia.com
-russia.com
-skk.moe
-
-# === 3. 网络工具与公共服务节点 ===
-iplocation.io
-www.iplocation.net
-whatismyipaddress.com
-www.whatismyip.com
-www.whoer.net
-www.ipchicken.com
-download.yunzhongzhuan.com
-fbi.gov
-www.who.int
-www.wto.org
-www.gov.ua
-gur.gov.ua
-www.zsu.gov.ua
-www.gco.gov.qa
-
-# === 4. 社区动态维护优选 CNAME/IP ===
-cf.090227.xyz
-log.bpminecraft.com
-www.pcmag.com
-www.boba88slot.com
-www.hugedomains.com
-www.baipiao.eu.org
-"""
-
-def init_domain_file():
-    if not os.path.exists(DOMAIN_FILE):
-        with open(DOMAIN_FILE, "w", encoding="utf-8") as f:
-            f.write(DEFAULT_DOMAINS.strip())
-        print(f"[提示] 已自动创建默认域名文件: {DOMAIN_FILE}")
-
 def load_domains():
-    init_domain_file()
+    if not os.path.exists(DOMAIN_FILE):
+        print(f"[错误] 未找到域名配置文件: {DOMAIN_FILE}")
+        return []
     domains = []
     with open(DOMAIN_FILE, "r", encoding="utf-8") as f:
         for line in f:
@@ -100,9 +35,16 @@ def load_domains():
     return domains
 
 def ping_domain(domain):
+    """底层调用系统 ping 发送 3 个包，解析 min/avg/max 中的 avg (平均延迟)"""
     is_win = platform.system().lower() == "windows"
-    cmd = ["ping", "-n" if is_win else "-c", "3", domain]
     
+    # 判断是否为 IPv6 地址
+    is_ipv6 = ":" in domain
+    if is_win:
+        cmd = ["ping", "-6" if is_ipv6 else "-4", "-n", "3", domain]
+    else:
+        cmd = ["ping6" if is_ipv6 else "ping", "-c", "3", domain]
+        
     try:
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=6)
         output = res.stdout
@@ -111,28 +53,29 @@ def ping_domain(domain):
             match = re.search(r'(?:平均|Average)\s*=\s*(\d+)ms', output)
             if match:
                 avg = float(match.group(1))
-                print(f"[Ping 测试] {domain:<30} 3次平均延迟: {avg:.1f} ms")
+                print(f"[Ping 测试] {domain:<35} 3次平均延迟: {avg:.1f} ms")
                 return (avg, domain)
         else:
             match = re.search(r'rtt min/avg/max/[^=]+=\s*[\d\.]+/([\d\.]+)/', output)
             if match:
                 avg = float(match.group(1))
-                print(f"[Ping 测试] {domain:<30} 3次平均延迟: {avg:.1f} ms")
+                print(f"[Ping 测试] {domain:<35} 3次平均延迟: {avg:.1f} ms")
                 return (avg, domain)
             match_alt = re.search(r'round-trip min/avg/max = [\d\.]+/([\d\.]+)/', output)
             if match_alt:
                 avg = float(match_alt.group(1))
-                print(f"[Ping 测试] {domain:<30} 3次平均延迟: {avg:.1f} ms")
+                print(f"[Ping 测试] {domain:<35} 3次平均延迟: {avg:.1f} ms")
                 return (avg, domain)
     except Exception:
         pass
         
-    print(f"[Ping 测试] {domain:<30} 超时/失败")
+    print(f"[Ping 测试] {domain:<35} 超时/失败")
     return None
 
 def test_download_speed(domain, duration=3):
-    """测试真实的 HTTP 下载速度 (MB/s)"""
-    url = f"https://{domain}/"
+    """测试真实的 HTTP/HTTPS 下载速度 (MB/s)"""
+    target = f"[{domain}]" if ":" in domain and not domain.startswith("[") else domain
+    url = f"https://{target}/"
     req = urllib.request.Request(
         url, 
         headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -178,7 +121,7 @@ def main():
         
     ping_results.sort(key=lambda x: x[0])
     
-    top_candidates = ping_results[:12]
+    top_candidates = ping_results[:15]
     
     print("\n" + "=" * 50)
     print(" 阶段二：正在对低延迟节点进行真实下载速度测速 (MB/s)......")
@@ -186,14 +129,14 @@ def main():
     
     final_results = []
     for avg, domain in top_candidates:
-        print(f"正在测试 {domain:<30} 实际下载速度...", end="", flush=True)
+        print(f"正在测试 {domain:<35} 实际下载速度...", end="", flush=True)
         speed = test_download_speed(domain, duration=2.5)
         print(f" -> {speed:.2f} MB/s (3次Ping平均: {avg:.1f}ms)")
         if speed > 0.0:
             final_results.append((speed, avg, domain))
             
     if not final_results:
-        print("\n[!] 提示: 未测得有效下载速度的节点 (可能由于连接限制)，请稍后再试。")
+        print("\n[!] 提示: 暂未测得有效 HTTP 下载速度的节点，请稍后再试。")
         return
 
     # 严格按照【实际下载速度】由高到低降序排序
@@ -203,7 +146,7 @@ def main():
     current_clean_out = os.path.abspath(OUTPUT_CLEAN_FILE)
     
     print("\n" + "=" * 50)
-    print(" 🏆 最终优选排序结果 (已过滤 0 MB/s 节点，仅保留有效高速域名):")
+    print(" 🏆 最终优选排序结果 (已过滤 0 MB/s 节点，仅保留有效高速节点/域名):")
     print("=" * 50)
     
     out_lines = []
@@ -220,9 +163,9 @@ def main():
         f.writelines(clean_lines)
 
     print("\n" + "-" * 50)
-    print(f" 提示: 已从上百节点中为您精选出 {len(final_results)} 个【有效可用】的纯域名，可直接长按复制！")
+    print(f" 提示: 已为您精选出 {len(final_results)} 个【有效可用】的节点，可直接长按复制！")
     print(" 文件保存完整路径如下:")
-    print(f"  📌 纯域名文件: {current_clean_out}")
+    print(f"  📌 纯节点/域名文件: {current_clean_out}")
     print(f"  📌 详细速度文件: {current_out}")
     print("-" * 50 + "\n")
 
