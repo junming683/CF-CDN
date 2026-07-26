@@ -4,7 +4,7 @@
 """
 CF-CDN 域名/IP 延迟与真实下载带宽双重测速工具
 支持 Android Termux / Linux / macOS / Windows
-自动支持 IPv4, IPv6, 域名与在线 API 动态拉取测速
+支持 1000+ 节点海量并发、动态 250ms 延迟门槛筛选与多线程 HTTP 下载测速
 """
 
 import os
@@ -55,7 +55,6 @@ def load_domains():
         return []
     domains = []
     
-    # 尝试拉取在线 API 实时 IP
     online_ips = fetch_online_api_ips()
     domains.extend(online_ips)
     
@@ -78,7 +77,7 @@ def ping_domain(domain):
         cmd = ["ping6" if is_ipv6 else "ping", "-c", "3", domain]
         
     try:
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=6)
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5)
         output = res.stdout
         
         if is_win:
@@ -143,12 +142,13 @@ def test_download_speed_single(item, duration=2.5):
 def main():
     domains = load_domains()
     print("==================================================")
-    print(f" 🚀 CF-CDN 域名/IP 真·测速工具 (共收录 {len(domains)} 个节点)")
+    print(f" 🚀 CF-CDN 域名/IP 真·测速工具 (全量收录 {len(domains)} 个节点)")
     print("==================================================")
-    print(" 阶段一：正在并发测试 3 次 Ping 延迟 (取平均值)......\n")
+    print(" 阶段一：正在进行海量并发 3 次 Ping 延迟探测 (取平均值)......\n")
     
     ping_results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+    # 使用 30 个并发线程进行 Ping 海量并发快速扫频
+    with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
         futures = [executor.submit(ping_domain, domain) for domain in domains]
         for future in concurrent.futures.as_completed(futures):
             res = future.result()
@@ -161,14 +161,20 @@ def main():
         
     ping_results.sort(key=lambda x: x[0])
     
-    top_candidates = ping_results[:35]
+    # 动态把所有 3次 Ping 平均延迟 <= 250 ms 的节点全部纳入阶段二真实下载测速候选池！
+    top_candidates = [item for item in ping_results if item[0] <= 250.0]
+    
+    if not top_candidates:
+        # 兜底策略：若没有低于 250ms 的，取前 30 个
+        top_candidates = ping_results[:30]
     
     print("\n" + "=" * 50)
-    print(f" 阶段二：正在对前 {len(top_candidates)} 个低延迟节点进行并发真实下载测速 (MB/s)......")
+    print(f" 阶段二：已匹配到 {len(top_candidates)} 个延迟 <= 250ms 的节点，正在并发进行真实下载测速 (MB/s)......")
     print("=" * 50 + "\n")
     
     final_results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+    # 阶段二采用 15 线程并发下载测速，即使有上百个合格节点也能在几秒内搞定！
+    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
         futures = [executor.submit(test_download_speed_single, item) for item in top_candidates]
         for future in concurrent.futures.as_completed(futures):
             speed, avg, domain = future.result()
@@ -186,7 +192,7 @@ def main():
     current_clean_out = os.path.abspath(OUTPUT_CLEAN_FILE)
     
     print("\n" + "=" * 50)
-    print(" 📊 测速结果详细数据 (速度与延迟):")
+    print(f" 📊 测速结果详细数据 (精选出 {len(final_results)} 个高速可用节点):")
     print("=" * 50)
     for speed, avg, domain in final_results:
         print(f"  {domain:<35} | 速度: {speed:5.2f} MB/s | 延迟: {avg:5.1f} ms")
@@ -211,7 +217,7 @@ def main():
         f.writelines(clean_lines)
 
     print("\n" + "-" * 50)
-    print(" 💡 提示: 直接长按框选【纯域名/IP 直复制区域】即可一键复制！")
+    print(f" 💡 提示: 已为您测得 {len(final_results)} 个在 250ms 门槛内【真实有速度】的绝佳节点！")
     print(" 文件保存完整路径如下:")
     print(f"  📌 纯节点文件: {current_clean_out}")
     print(f"  📌 详细速度文件: {current_out}")
