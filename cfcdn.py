@@ -176,15 +176,50 @@ def main():
     current_out = os.path.join(out_dir, OUTPUT_FILE)
     current_clean_out = os.path.join(out_dir, OUTPUT_CLEAN_FILE)
 
-    domains = load_domains()
+    # ---- 模式选择 ----
+    print("")
     print("==================================================")
-    print(f" 🚀 CF-CDN 域名/IP 真·测速工具 (全量收录 {len(domains)} 个节点)")
+    print(" 🚀 CF-CDN 域名/IP 真·测速工具")
+    print("==================================================")
+    print("")
+    print(" 请选择测速模式：")
+    print("")
+    print("  1️⃣  极速模式  - Ping 30线程 + 下载 15线程")
+    print("      适合: 旗舰手机/平板、内存充足 (>=6GB)")
+    print("      注意: 内存不足时可能被系统强杀 (signal 9)")
+    print("")
+    print("  2️⃣  稳定模式  - Ping 10线程 + 下载 6线程")
+    print("      适合: 所有设备，不会被系统强杀")
+    print("      注意: 速度较慢，1000+节点约需 5~10 分钟")
+    print("")
+
+    while True:
+        try:
+            choice = input(" 请输入 1 或 2 (默认: 2 稳定模式): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            choice = "2"
+        if choice == "1":
+            ping_workers = 30
+            download_workers = 15
+            mode_name = "极速模式"
+            break
+        elif choice == "" or choice == "2":
+            ping_workers = 10
+            download_workers = 6
+            mode_name = "稳定模式"
+            break
+        else:
+            print(" ⚠️  请输入 1 或 2")
+
+    domains = load_domains()
+    print("")
+    print("==================================================")
+    print(f" 🚀 [{mode_name}] 全量收录 {len(domains)} 个节点 | Ping:{ping_workers}线程 / 下载:{download_workers}线程")
     print("==================================================")
     print(" 阶段一：正在进行海量并发 3 次 Ping 延迟探测 (取平均值)......\n")
 
     ping_results = []
-    # 线程数控制在 10，防止 Android 因内存压力发出 signal 9 强杀进程
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=ping_workers) as executor:
         futures = [executor.submit(ping_domain, domain) for domain in domains]
         for future in concurrent.futures.as_completed(futures):
             res = future.result()
@@ -207,8 +242,7 @@ def main():
     print("=" * 50 + "\n")
 
     final_results = []
-    # 下载测速线程数控制在 6，防止同时发起大量网络请求导致 Android OOM Kill
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=download_workers) as executor:
         futures = [executor.submit(test_download_speed_single, item) for item in top_candidates]
         for future in concurrent.futures.as_completed(futures):
             speed, avg, domain = future.result()
