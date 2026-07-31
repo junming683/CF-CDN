@@ -4,7 +4,11 @@
 """
 CF-CDN 域名/IP 延迟与真实下载带宽双重测速工具
 支持 Android Termux / Linux / macOS / Windows
-支持 1000+ 节点海量并发、动态 250ms 延迟门槛筛选与多线程 HTTP 下载测速
+支持 1000+ 节点、动态 250ms 延迟门槛筛选与多线程 HTTP 下载测速
+
+并发线程配置（防止 Android OOM Killer 强杀进程）:
+  - Ping 阶段: 10 线程（稳定，不撑爆内存）
+  - 下载测速阶段: 6 线程（稳定，不撑爆内存）
 """
 
 import os
@@ -179,7 +183,8 @@ def main():
     print(" 阶段一：正在进行海量并发 3 次 Ping 延迟探测 (取平均值)......\n")
 
     ping_results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
+    # 线程数控制在 10，防止 Android 因内存压力发出 signal 9 强杀进程
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         futures = [executor.submit(ping_domain, domain) for domain in domains]
         for future in concurrent.futures.as_completed(futures):
             res = future.result()
@@ -202,7 +207,8 @@ def main():
     print("=" * 50 + "\n")
 
     final_results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+    # 下载测速线程数控制在 6，防止同时发起大量网络请求导致 Android OOM Kill
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
         futures = [executor.submit(test_download_speed_single, item) for item in top_candidates]
         for future in concurrent.futures.as_completed(futures):
             speed, avg, domain = future.result()
