@@ -5,18 +5,19 @@
 CF-CDN 智能多网/多运营商 Cloudflare CDN 真实带宽与延迟测速工具
 支持 Android Termux / Linux / macOS / Windows
 
-核心优化：
-  1. 运营商精准分流（电信 / 移动 / 联通 / 三网全量通用）
-  2. 针对运营商自动拉取实时在线优选 API 与专属节点库
+核心特性：
+  1. 多源动态在线 API 自动同步（vps789.com + ipdb.api.030101.xyz + 090227.xyz）
+  2. 运营商精准分流（电信 / 移动 / 联通 / 三网全量通用）
   3. 双阶段深度真·测速（并发 Ping 过滤 + Cloudflare 官方真实下载带宽测试）
   4. 解决纯 IP 测速 SSL 握手报错与假 0MB/s 问题（支持 TLS SNI / Host 伪装）
-  5. 分类输出（综合最佳 Top4、高带宽 Top4、极低延迟 Top4）与纯节点直复制区域
-  6. 内存保护与多并发模式（防 Android Termux OOM 崩溃）
+  5. 智能分类推荐（综合最佳 Top4、高带宽 Top4、极低延迟 Top4）与纯节点直复制区域
+  6. 内存保护与多并发模式（防 Android Termux OOM 强杀）
 """
 
 import os
 import sys
 import re
+import json
 import time
 import socket
 import ssl
@@ -45,8 +46,10 @@ ISP_CONFIG = {
     "1": {
         "name": "中国电信 (China Telecom)",
         "desc": "美西直连 / 大带宽抗丢包节点 (SJC/LAX)",
-        "api_urls": [
-            "https://cf.090227.xyz/ct?ips=25",
+        "vps789_key": "CT",
+        "ipdb_types": ["bestcf", "bestproxy"],
+        "extra_api_urls": [
+            "https://cf.090227.xyz/ct?ips=20",
         ],
         "ping_threshold": 350.0,  # 电信直连美西正常物理延迟在 140~220ms，放宽门槛确保真实美西节点进入测速
         "priority_prefixes": ["104.16.", "104.17.", "104.18.", "104.19.", "162.159.", "198.41.", "172.67."],
@@ -65,8 +68,10 @@ ISP_CONFIG = {
     "2": {
         "name": "中国移动 (China Mobile)",
         "desc": "香港 / 新加坡 / 日本 CMI 低延迟节点",
-        "api_urls": [
-            "https://cf.090227.xyz/cmcc?ips=25",
+        "vps789_key": "CM",
+        "ipdb_types": ["bestcf", "bestproxy"],
+        "extra_api_urls": [
+            "https://cf.090227.xyz/cmcc?ips=20",
         ],
         "ping_threshold": 160.0,  # 移动严选亚洲低延迟直连
         "priority_prefixes": ["104.28.", "172.67.", "104.21.", "104.22.", "104.23.", "104.24.", "104.25.", "108.162.", "141.101."],
@@ -86,8 +91,10 @@ ISP_CONFIG = {
     "3": {
         "name": "中国联通 (China Unicom)",
         "desc": "美西直连 / 亚洲软银 AS4837 节点",
-        "api_urls": [
-            "https://cf.090227.xyz/cu?ips=25",
+        "vps789_key": "CU",
+        "ipdb_types": ["bestcf", "bestproxy"],
+        "extra_api_urls": [
+            "https://cf.090227.xyz/cu?ips=20",
         ],
         "ping_threshold": 260.0,
         "priority_prefixes": ["104.16.", "104.17.", "104.28.", "172.67.", "104.21."],
@@ -103,7 +110,9 @@ ISP_CONFIG = {
     "4": {
         "name": "三网全量 / 综合通用 (Universal)",
         "desc": "聚合三网在线 API 与全量 1000+ 节点库",
-        "api_urls": [
+        "vps789_key": "AllAvg",
+        "ipdb_types": ["bestcf", "bestproxy"],
+        "extra_api_urls": [
             "https://cf.090227.xyz/ct?ips=10",
             "https://cf.090227.xyz/cu?ips=10",
             "https://cf.090227.xyz/cmcc?ips=10",
@@ -124,7 +133,7 @@ ISP_CONFIG = {
 def get_output_dir():
     """
     获取输出目录：
-    - Android Termux: 优先保存到 /sdcard/CF-CDN/（用户可在手机文件管理器中直接查看）
+    - Android Termux: 优先保存到 /sdcard/CF-CDN/（手机文件管理器直接可见）
     - 其他系统: 保存到当前脚本目录
     """
     if os.path.exists("/sdcard"):
@@ -160,49 +169,108 @@ def is_valid_target(item):
     return False
 
 
-def fetch_online_api_ips(api_urls):
-    """从在线 API 获取实时动态优选 IP"""
+def fetch_online_apis(isp_key):
+    """
+    多源在线 API 自动抓取与解析：
+      1. vps789.com (https://vps789.com/public/sum/cfIpApi) -> 提取 CT/CM/CU/AllAvg
+      2. ipdb.api.030101.xyz (https://ipdb.api.030101.xyz/?type=bestcf;bestproxy) -> 提取 030101 优选
+      3. cf.090227.xyz (https://cf.090227.xyz/...) -> 补充三网实时 IP
+    """
+    cfg = ISP_CONFIG[isp_key]
     online_ips = []
-    print("[+] 正在尝试自动在线获取实时优选 IP 列表......")
-    for url in api_urls:
+    seen = set()
+
+    def add_target(target):
+        t = target.strip()
+        if is_valid_target(t) and t.lower() not in seen:
+            seen.add(t.lower())
+            online_ips.append(t)
+
+    print("\n[+] 正在自动同步各大在线 API 优选数据库......")
+
+    # ---- 1. vps789.com API ----
+    try:
+        url_vps789 = "https://vps789.com/public/sum/cfIpApi"
+        req = urllib.request.Request(url_vps789, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            data = json.loads(resp.read().decode('utf-8', errors='ignore'))
+            if data.get("code") == 0:
+                vps_key = cfg.get("vps789_key", "AllAvg")
+                vps_data = data.get("data", {})
+                count = 0
+                if isp_key == "4":
+                    for k in ["CT", "CM", "CU", "AllAvg"]:
+                        for item in vps_data.get(k, []):
+                            if "ip" in item:
+                                add_target(item["ip"])
+                                count += 1
+                else:
+                    for item in vps_data.get(vps_key, []):
+                        if "ip" in item:
+                            add_target(item["ip"])
+                            count += 1
+                print(f" [✔] [vps789.com] 成功同步 {count} 个 [{vps_key}] 专属优选节点")
+    except Exception:
+        print(" [-] [vps789.com] 接口连接超时，自动跳过")
+
+    # ---- 2. ipdb.api.030101.xyz API ----
+    try:
+        types_str = ";".join(cfg.get("ipdb_types", ["bestcf", "bestproxy"]))
+        url_ipdb = f"https://ipdb.api.030101.xyz/?type={types_str}"
+        req = urllib.request.Request(url_ipdb, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            content = resp.read().decode('utf-8', errors='ignore')
+            count = 0
+            for line in content.splitlines():
+                ip = line.strip()
+                if is_valid_target(ip):
+                    add_target(ip)
+                    count += 1
+            print(f" [✔] [ipdb.api.030101.xyz] 成功同步 {count} 个优选官方/反代节点")
+    except Exception:
+        print(" [-] [ipdb.api.030101.xyz] 接口连接超时，自动跳过")
+
+    # ---- 3. cf.090227.xyz 补充 API ----
+    for url in cfg.get("extra_api_urls", []):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-            with urllib.request.urlopen(req, timeout=4) as resp:
+            with urllib.request.urlopen(req, timeout=3) as resp:
                 content = resp.read().decode('utf-8', errors='ignore')
                 for line in content.splitlines():
                     ip = line.strip()
-                    if is_valid_target(ip) and ip not in online_ips:
-                        online_ips.append(ip)
+                    if is_valid_target(ip):
+                        add_target(ip)
         except Exception:
             pass
 
     if online_ips:
-        print(f"[✔] 成功获取 {len(online_ips)} 个在线实时优质节点！")
+        print(f"[✔] 在线 API 聚合去重完成，共获得 {len(online_ips)} 个高优先级实时在线节点！")
     else:
-        print("[-] 在线 API 暂未响应，将自动使用本地专属节点库进行测速。")
+        print("[-] 在线 API 暂未返回数据，将直接使用本地专属节点库。")
+
     return online_ips
 
 
 def load_candidate_nodes(isp_key, limit=None):
-    """根据运营商选择加载匹配的节点库"""
+    """根据运营商选择加载匹配的节点库（在线 API + 本地专属）"""
     cfg = ISP_CONFIG[isp_key]
     candidates = []
     seen = set()
 
-    # 1. 优先加入专属域名
+    # 1. 优先加入专属优质域名
     for d in cfg.get("priority_domains", []):
         if d.lower() not in seen:
             seen.add(d.lower())
             candidates.append(d)
 
-    # 2. 动态拉取在线 API
-    api_ips = fetch_online_api_ips(cfg.get("api_urls", []))
+    # 2. 动态拉取在线 API (vps789.com + 030101.xyz + 090227)
+    api_ips = fetch_online_apis(isp_key)
     for ip in api_ips:
         if ip.lower() not in seen:
             seen.add(ip.lower())
             candidates.append(ip)
 
-    # 3. 读取本地 domains.txt
+    # 3. 读取本地 domains.txt (带运营商网段优先级)
     if os.path.exists(DOMAIN_FILE):
         prefixes = cfg.get("priority_prefixes", [])
         priority_local = []
@@ -214,19 +282,16 @@ def load_candidate_nodes(isp_key, limit=None):
                 if not is_valid_target(item) or item.lower() in seen:
                     continue
 
-                # 如果是专属网段优先
                 if prefixes and any(item.startswith(pfx) for pfx in prefixes):
                     priority_local.append(item)
                 else:
                     normal_local.append(item)
 
-        # 优先将运营商专属网段加入
         for item in priority_local:
             if item.lower() not in seen:
                 seen.add(item.lower())
                 candidates.append(item)
 
-        # 再追加常规节点
         for item in normal_local:
             if item.lower() not in seen:
                 seen.add(item.lower())
@@ -460,7 +525,7 @@ def main():
         else:
             print(" ⚠️  请输入 1、2 或 3")
 
-    # 1. 加载节点
+    # 1. 动态拉取在线 API + 加载节点
     nodes = load_candidate_nodes(isp_choice, limit=limit_count)
     if not nodes:
         print("[!] 错误: 未能加载到有效节点，请检查网络或 domains.txt 文件。")
