@@ -136,45 +136,16 @@ www.gco.gov.qa
 
 # === 来自 Desktop 123.cf.090227.xyz.txt 的全量域名与 IP 库 ===
 01-qq.com
-1.0MB
-1.2MB
-1.4MB
 1.cf.3666888.xyz
 1.cloudflare.19931110.xyz
-10.0MB
-10.1MB
-10.2MB
-10.3MB
-10.4MB
-10.5MB
-10.6MB
-10.7MB
-10.8MB
-10.9MB
 10.cf.3666888.xyz
-1003KB
 103.21.244.0
 103.22.200.0
 103.31.4.0
 104.16.0.0
 104.24.0.0
 108.162.192.0
-11.1MB
-11.2MB
-11.3MB
-11.4MB
-11.5MB
-11.6MB
-11.7MB
-11.8MB
-11.9MB
 11.cf.3666888.xyz
-12.0MB
-12.1MB
-12.2MB
-12.5MB
-12.6MB
-122KB
 123.cf.090227.xyz
 123.cf.3666888.xyz
 129.146.53.213
@@ -204,9 +175,6 @@ www.gco.gov.qa
 129.159.143.171
 129.159.202.83
 129.159.241.172
-13.1MB
-13.3MB
-13.8MB
 130.162.128.200
 130.162.130.105
 130.162.132.107
@@ -324,9 +292,6 @@ www.gco.gov.qa
 138.3.218.212
 138.3.223.73
 138.3.240.63
-14.2MB
-14.3MB
-14.4MB
 140.238.173.181
 140.238.201.118
 140.238.218.65
@@ -796,27 +761,11 @@ www.gco.gov.qa
 193.123.80.245
 193.123.81.105
 197.234.240.0
-197KB
 198.41.128.0
-2.1MB
-2.5MB
-2.7MB
-2.9MB
 2.cf.3666888.xyz
 204.216.216.148
-262KB
-289KB
-291KB
-3.5MB
 3.cf.3666888.xyz
-303KB
-311KB
-317KB
-4.1MB
-4.8MB
 4.cf.3666888.xyz
-407KB
-422KB
 47.242.121.232
 47.242.123.166
 47.242.21.91
@@ -836,23 +785,8 @@ www.gco.gov.qa
 47.74.155.26
 47.74.157.194
 47.90.141.204
-482KB
-48KB
-5.4MB
-5.6MB
-5.9MB
 5.cf.3666888.xyz
-511KB
-533KB
-563KB
-573KB
-6.1MB
-6.3MB
-6.8MB
 6.cf.3666888.xyz
-617KB
-637KB
-63KB
 64.110.101.31
 64.110.104.30
 64.110.73.95
@@ -860,16 +794,7 @@ www.gco.gov.qa
 64.110.77.205
 64.110.89.138
 64.110.90.183
-64TV
-67KB
-69KB
-7.2MB
-7.3MB
-7.9MB
 7.cf.3666888.xyz
-737KB
-8.0MB
-8.1MB
 8.210.110.229
 8.210.233.168
 8.210.48.192
@@ -960,36 +885,11 @@ www.gco.gov.qa
 8.222.228.90
 8.222.235.125
 8.222.255.80
-8.9MB
 8.cf.3666888.xyz
-879KB
-9.0MB
-9.4MB
-9.5MB
-9.6MB
-9.7MB
-9.8MB
 9.cf.3666888.xyz
-DNSHE官方
-Galgamex油醋汁
-Github@LoserLiunian 电信快乐
-HuoF
-IDC ROCKS
-Kentural
-MarkMonitor集团
-Ming
-NexusMods 静态资源分发域名
-Ookla, LLC
-TomyJan
-TomyJan , 建议用于下载
-ZCCDVTC
-ZHIZHANG
-ZHIZHNAG
-ZSFan的优选IP
 a.lma.de5.net
 adnjv.cf.3666888.xyz
 api.gzcrtw.com
-apple
 athome.com
 avido.cf.3666888.xyz
 baka.fun
@@ -1043,10 +943,6 @@ cmcc.877774.xyz
 cmcc.cc.cd
 cmcc.hw.090227.xyz
 cmcc.vvvv.ee
-cnae
-cnae 电信
-cnae 移动
-cnae 联通
 cnamefuckxxs.yuchen.icu
 cnllm.com
 coke.cf.3666888.xyz
@@ -1060,12 +956,9 @@ cu.877774.xyz
 d.lma.de5.net
 da.mfa.gov.ua
 dango.co
-deacms
 dnew.cc
 dongbanghong.com
 dynadot.com
-dynadot大型域名注册商官网
-eason
 edgeone.gh-proxy.org
 eii.at
 eii.at-DWZ
@@ -1082,7 +975,6 @@ hk.cf.3666888.xyz
 hzytjy.cn
 i.111666.best
 investor.apple.com
-ipv4
 isp.254301.xyz
 jobsdb.com
 jp.cf.3666888.xyz
@@ -1097,14 +989,11 @@ mogas.com
 mskcc.org
 my.dnshe.com
 networksolutions.com
-nexusmods
 nexusmods.com
 nrt.xxxxxxxx.nyc.mn
-nyanya喵喵
 openai.com
 ping.pe
 play.mc.js.cool
-postman的官网，使用cf的服务，我ping后发现延迟低
 prompt.gzcrtw.com
 pubs.acs.org
 qocu.cf.3666888.xyz
@@ -1112,7 +1001,6 @@ qualitytraining.zeiss.com
 qy.cf.727672.xyz
 reader.sudorm.su
 redis.io
-redis的官网，使用cf的服务，我ping后发现延迟低
 run.254301.xyz
 saas.072159.xyz
 sanwang.cf.3666888.xyz
@@ -1120,7 +1008,6 @@ serviceshub.samsclub.com
 sg.cf.3666888.xyz
 shanghai.mfa.gov.ua
 snipaste5.speedip.eu.org
-sofi
 stackoverflow.com
 stlouiscountymo.gov
 stoeaves.com
@@ -1133,7 +1020,6 @@ vip.cf.3666888.xyz
 visa.com
 visa.com.tw
 vps.cheng2001.top
-vps789本站维护
 www.5199dy.com
 www.6i5.com
 www.akasantech.com
@@ -1171,28 +1057,8 @@ yg11.ygkkk.dpdns.org
 yg3.ygkkk.dpdns.org
 yg5.ygkkk.dpdns.org
 yg9.ygkkk.dpdns.org
-yong
 youxuan.cf.3666888.xyz
-yutank
 yx.oracle-img.eu.org
 yxip.xxxxxxxx.tk
 zeas.top
 zero-trust-client.cloudflareclient.com
-三网优化
-三网优化,官网:1d.mom
-乌克兰政府官网
-乌克兰驻上海大使馆
-乌克兰驻华大使馆
-二叉树树
-快连VPN官网，使用了cf，速度也很快
-提交者 _RyF nodeseek @rainyfall
-牛津大学-@ZHIZHANG
-特朗普国际地产集团
-特朗普集团
-秋名山 qmsdh.com
-移动优选
-美国化学会官网
-联通优选
-育碧(Ubisoft)官方商店域名
-蜘蛛网络
-高速优选

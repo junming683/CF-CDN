@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+CDNym.txt
+CDNym_clean.txt
+.test_write
