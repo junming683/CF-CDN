@@ -7,11 +7,12 @@ CF-CDN 智能多网/多运营商 Cloudflare CDN 真实带宽与延迟测速工�
 
 核心特性：
   1. 多源动态在线 API 自动同步（vps789.com + ipdb.api.030101.xyz + 090227.xyz）
-  2. 运营商精准分流（电信 / 移动 / 联通 / 三网全量通用）
-  3. 双阶段深度真·测速（并发 Ping 过滤 + Cloudflare 官方真实下载带宽测试）
-  4. 解决纯 IP 测速 SSL 握手报错与假 0MB/s 问题（支持 TLS SNI / Host 伪装）
-  5. 智能分类推荐（综合最佳 Top4、高带宽 Top4、极低延迟 Top4）与纯节点直复制区域
-  6. 内存保护与多并发模式（防 Android Termux OOM 强杀）
+  2. 内置 vps789 官方 Token 授权，拉取 CT/CM/CU 专属分流库与全网 Top20 优选池
+  3. 运营商精准分流（电信 / 移动 / 联通 / 三网全量通用）
+  4. 双阶段深度真·测速（并发 Ping 过滤 + Cloudflare 官方真实下载带宽测试）
+  5. 解决纯 IP 测速 SSL 握手报错与假 0MB/s 问题（支持 TLS SNI / Host 伪装）
+  6. 智能分类推荐（综合最佳 Top4、高带宽 Top4、极低延迟 Top4）与纯节点直复制区域
+  7. 内存保护与多并发模式（防 Android Termux OOM 强杀）
 """
 
 import os
@@ -39,6 +40,9 @@ OUTPUT_CLEAN_FILE = "CDNym_clean.txt"
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DOMAIN_FILE = os.path.join(SCRIPT_DIR, "domains.txt")
+
+# vps789 API 授权 Token
+VPS789_TOKEN = "1V1B837SN4VBG42SC1X83DHJ0SMTR8SK"
 
 # ================= 运营商专属配置与在线 API =================
 
@@ -152,7 +156,7 @@ def get_output_dir():
 
 def is_valid_target(item):
     """验证是否为合法的 IP 或域名"""
-    s = item.strip()
+    s = str(item).strip()
     if not s or s.startswith("#"):
         return False
     # IPv4
@@ -172,7 +176,9 @@ def is_valid_target(item):
 def fetch_online_apis(isp_key):
     """
     多源在线 API 自动抓取与解析：
-      1. vps789.com (https://vps789.com/public/sum/cfIpApi) -> 提取 CT/CM/CU/AllAvg
+      1. vps789.com (Token 授权):
+         - https://vps789.com/openApi/cfIpApi?token=xxx -> 提取 CT/CM/CU/AllAvg 专属库
+         - https://vps789.com/openApi/cfIpTop20?token=xxx -> 提取全网 Top20 优选池
       2. ipdb.api.030101.xyz (https://ipdb.api.030101.xyz/?type=bestcf;bestproxy) -> 提取 030101 优选
       3. cf.090227.xyz (https://cf.090227.xyz/...) -> 补充三网实时 IP
     """
@@ -181,17 +187,18 @@ def fetch_online_apis(isp_key):
     seen = set()
 
     def add_target(target):
-        t = target.strip()
+        t = str(target).strip()
         if is_valid_target(t) and t.lower() not in seen:
             seen.add(t.lower())
             online_ips.append(t)
 
     print("\n[+] 正在自动同步各大在线 API 优选数据库......")
 
-    # ---- 1. vps789.com API ----
+    # ---- 1. vps789.com Token 授权 API ----
+    # 1.1 专属分类库 (CT / CM / CU / AllAvg)
     try:
-        url_vps789 = "https://vps789.com/public/sum/cfIpApi"
-        req = urllib.request.Request(url_vps789, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        url_vps_api = f"https://vps789.com/openApi/cfIpApi?token={VPS789_TOKEN}"
+        req = urllib.request.Request(url_vps_api, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
         with urllib.request.urlopen(req, timeout=4) as resp:
             data = json.loads(resp.read().decode('utf-8', errors='ignore'))
             if data.get("code") == 0:
@@ -211,7 +218,24 @@ def fetch_online_apis(isp_key):
                             count += 1
                 print(f" [✔] [vps789.com] 成功同步 {count} 个 [{vps_key}] 专属优选节点")
     except Exception:
-        print(" [-] [vps789.com] 接口连接超时，自动跳过")
+        print(" [-] [vps789.com cfIpApi] 接口连接超时，自动跳过")
+
+    # 1.2 全网 Top20 优选池
+    try:
+        url_vps_top = f"https://vps789.com/openApi/cfIpTop20?token={VPS789_TOKEN}"
+        req = urllib.request.Request(url_vps_top, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            data = json.loads(resp.read().decode('utf-8', errors='ignore'))
+            if data.get("code") == 0:
+                top_items = data.get("data", {}).get("good", [])
+                top_count = 0
+                for item in top_items:
+                    if "ip" in item:
+                        add_target(item["ip"])
+                        top_count += 1
+                print(f" [✔] [vps789.com] 成功同步 {top_count} 个 Top20 全网优质节点")
+    except Exception:
+        pass
 
     # ---- 2. ipdb.api.030101.xyz API ----
     try:
