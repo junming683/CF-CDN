@@ -2,17 +2,18 @@
 # -*- coding: utf-8 -*-
 
 """
-CF-CDN 智能多网/多运营商 Cloudflare CDN 真实带宽与延迟测速工具
+CF-CDN 智能多网/多运营商 Cloudflare CDN 真实带宽与延迟测速 & 分析工具
+特别针对 Android Termux 手机环境深度调优
+原生集成 youxuanIP-analysis 智能分类算法
 支持 Android Termux / Linux / macOS / Windows
 
-核心特性：
-  1. 多源动态在线 API 自动同步（vps789.com + ipdb.api.030101.xyz + 090227.xyz）
-  2. 内置 vps789 官方 Token 授权，拉取 CT/CM/CU 专属分流库与全网 Top20 优选池
-  3. 运营商精准分流（电信 / 移动 / 联通 / 三网全量通用）
-  4. 双阶段深度真·测速（并发 Ping 过滤 + Cloudflare 官方真实下载带宽测试）
-  5. 解决纯 IP 测速 SSL 握手报错与假 0MB/s 问题（支持 TLS SNI / Host 伪装）
-  6. 智能分类推荐（综合最佳 Top4、高带宽 Top4、极低延迟 Top4）与纯节点直复制区域
-  7. 内存保护与多并发模式（防 Android Termux OOM 强杀）
+Termux 专属特性：
+  1. 深度集成 youxuanIP-analysis 纯文本规范输出（手机端长按即可整段复制）
+  2. 支持 Termux:API 自动写入手机系统剪贴板（无需手动框选）
+  3. 自动同步保存到手机内部存储 /sdcard/CF-CDN/（手机文件管理器直接打开）
+  4. 多源动态在线 API 自动同步（vps789.com + ipdb.api.030101.xyz + 090227.xyz）
+  5. 内存与并发控制（防 Android 系统 OOM 强杀）
+  6. 支持“真·测速模式”与“导入已有测速文件分析模式”双模运行
 """
 
 import os
@@ -55,7 +56,7 @@ ISP_CONFIG = {
         "extra_api_urls": [
             "https://cf.090227.xyz/ct?ips=20",
         ],
-        "ping_threshold": 350.0,  # 电信直连美西正常物理延迟在 140~220ms，放宽门槛确保真实美西节点进入测速
+        "ping_threshold": 350.0,
         "priority_prefixes": ["104.16.", "104.17.", "104.18.", "104.19.", "162.159.", "198.41.", "172.67."],
         "priority_domains": [
             "ct.090227.xyz",
@@ -77,7 +78,7 @@ ISP_CONFIG = {
         "extra_api_urls": [
             "https://cf.090227.xyz/cmcc?ips=20",
         ],
-        "ping_threshold": 160.0,  # 移动严选亚洲低延迟直连
+        "ping_threshold": 160.0,
         "priority_prefixes": ["104.28.", "172.67.", "104.21.", "104.22.", "104.23.", "104.24.", "104.25.", "108.162.", "141.101."],
         "priority_domains": [
             "cm.090227.xyz",
@@ -154,6 +155,19 @@ def get_output_dir():
     return SCRIPT_DIR
 
 
+def try_copy_to_clipboard(text):
+    """在 Android Termux 下尝试调用系统剪贴板"""
+    try:
+        res = subprocess.run(["which", "termux-clipboard-set"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if res.returncode == 0:
+            p = subprocess.Popen(["termux-clipboard-set"], stdin=subprocess.PIPE)
+            p.communicate(input=text.encode("utf-8"))
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def is_valid_target(item):
     """验证是否为合法的 IP 或域名"""
     s = str(item).strip()
@@ -166,7 +180,7 @@ def is_valid_target(item):
     # IPv6
     if ':' in s and re.match(r'^[0-9a-fA-F:]+$', s):
         return True
-    # 域名（排除带有 MB, KB, ms 等非域名杂质）
+    # 域名
     if re.match(r'^[a-zA-Z0-9][-a-zA-Z0-9]*(\.[a-zA-Z0-9][-a-zA-Z0-9]*)+\.?$', s):
         if not any(s.lower().endswith(ext) for ext in ['.mb', '.kb', '.ms', '.b/s', '.b']):
             return True
@@ -174,14 +188,7 @@ def is_valid_target(item):
 
 
 def fetch_online_apis(isp_key):
-    """
-    多源在线 API 自动抓取与解析：
-      1. vps789.com (Token 授权):
-         - https://vps789.com/openApi/cfIpApi?token=xxx -> 提取 CT/CM/CU/AllAvg 专属库
-         - https://vps789.com/openApi/cfIpTop20?token=xxx -> 提取全网 Top20 优选池
-      2. ipdb.api.030101.xyz (https://ipdb.api.030101.xyz/?type=bestcf;bestproxy) -> 提取 030101 优选
-      3. cf.090227.xyz (https://cf.090227.xyz/...) -> 补充三网实时 IP
-    """
+    """多源在线 API 自动抓取与解析"""
     cfg = ISP_CONFIG[isp_key]
     online_ips = []
     seen = set()
@@ -194,8 +201,7 @@ def fetch_online_apis(isp_key):
 
     print("\n[+] 正在自动同步各大在线 API 优选数据库......")
 
-    # ---- 1. vps789.com Token 授权 API ----
-    # 1.1 专属分类库 (CT / CM / CU / AllAvg)
+    # 1. vps789.com Token 授权 API
     try:
         url_vps_api = f"https://vps789.com/openApi/cfIpApi?token={VPS789_TOKEN}"
         req = urllib.request.Request(url_vps_api, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
@@ -220,7 +226,6 @@ def fetch_online_apis(isp_key):
     except Exception:
         print(" [-] [vps789.com cfIpApi] 接口连接超时，自动跳过")
 
-    # 1.2 全网 Top20 优选池
     try:
         url_vps_top = f"https://vps789.com/openApi/cfIpTop20?token={VPS789_TOKEN}"
         req = urllib.request.Request(url_vps_top, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
@@ -237,7 +242,7 @@ def fetch_online_apis(isp_key):
     except Exception:
         pass
 
-    # ---- 2. ipdb.api.030101.xyz API ----
+    # 2. ipdb.api.030101.xyz API
     try:
         types_str = ";".join(cfg.get("ipdb_types", ["bestcf", "bestproxy"]))
         url_ipdb = f"https://ipdb.api.030101.xyz/?type={types_str}"
@@ -254,7 +259,7 @@ def fetch_online_apis(isp_key):
     except Exception:
         print(" [-] [ipdb.api.030101.xyz] 接口连接超时，自动跳过")
 
-    # ---- 3. cf.090227.xyz 补充 API ----
+    # 3. cf.090227.xyz 补充 API
     for url in cfg.get("extra_api_urls", []):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
@@ -276,25 +281,22 @@ def fetch_online_apis(isp_key):
 
 
 def load_candidate_nodes(isp_key, limit=None):
-    """根据运营商选择加载匹配的节点库（在线 API + 本地专属）"""
+    """根据运营商选择加载匹配的节点库"""
     cfg = ISP_CONFIG[isp_key]
     candidates = []
     seen = set()
 
-    # 1. 优先加入专属优质域名
     for d in cfg.get("priority_domains", []):
         if d.lower() not in seen:
             seen.add(d.lower())
             candidates.append(d)
 
-    # 2. 动态拉取在线 API (vps789.com + 030101.xyz + 090227)
     api_ips = fetch_online_apis(isp_key)
     for ip in api_ips:
         if ip.lower() not in seen:
             seen.add(ip.lower())
             candidates.append(ip)
 
-    # 3. 读取本地 domains.txt (带运营商网段优先级)
     if os.path.exists(DOMAIN_FILE):
         prefixes = cfg.get("priority_prefixes", [])
         priority_local = []
@@ -366,14 +368,10 @@ def ping_domain(domain):
 
 
 def test_download_speed_single(item, duration=2.5):
-    """
-    单节点真·下载带宽测速 (MB/s)
-    采用 Cloudflare 官方真实数据流测速机制 + SNI / Host 伪装，完美解决纯 IP 报错与小文件测速失真
-    """
+    """单节点真·下载带宽测速 (MB/s)"""
     avg, domain = item
     speed_mb = 0.0
 
-    # 策略 1: 针对 Cloudflare Anycast IP 与官方/反代域名，发起官方速度流下载
     try:
         addr_info = socket.getaddrinfo(domain, 443, proto=socket.IPPROTO_TCP)
         if addr_info:
@@ -408,7 +406,6 @@ def test_download_speed_single(item, duration=2.5):
     except Exception:
         pass
 
-    # 策略 2: 如果策略 1 未测出（例如自定义第三方反代站或特殊域名），回退为常规根路径测速
     if speed_mb <= 0.0 and not (domain.replace('.', '').isdigit() or ':' in domain):
         try:
             req = urllib.request.Request(
@@ -443,79 +440,197 @@ def test_download_speed_single(item, duration=2.5):
         return (0.0, avg, domain)
 
 
-def categorize_results(results):
+# ================= youxuanIP-analysis 核心算法与格式生成 =================
+
+def run_youxuan_analysis(results):
     """
-    根据测速数据进行智能分类（每类精选 Top 4，互不重复）
-    1. 综合最佳优选 (Top 4)
-    2. 高带宽 / 大流量优选 (Top 4)
-    3. 极低延迟优选 (Top 4)
+    youxuanIP-analysis 核心算法实现：
+      - 综合最佳优选 (Top 4): 速度降序，排除 >300ms，顺延补齐
+      - 高带宽 / 大流量优选 (Top 4): 排除已用，速度降序
+      - 极低延迟优选 (Top 4): 排除已用，延迟 <100ms -> <150ms -> 顺延补齐
+      - 三个类别之间域名互不重复
     """
     best_list = []
     bandwidth_list = []
     latency_list = []
     used_domains = set()
 
-    # 1. 综合最佳优选：按速度降序，排除极端高延迟 (>320ms) 的节点，选取 Top 4
-    sorted_by_speed = sorted(results, key=lambda x: (-x[0], x[1]))
-    for item in sorted_by_speed:
+    # 1. 综合最佳优选：按速度从高到低排序，选取 Top4 域名。同时兼顾延迟，若延迟过高（>300ms）则顺延下一个。
+    by_speed = sorted(results, key=lambda x: (-x[0], x[1]))
+    for item in by_speed:
         if len(best_list) >= 4:
             break
         speed, avg, domain = item
-        if avg <= 320.0 and domain not in used_domains:
+        if avg <= 300.0 and domain not in used_domains:
             best_list.append(item)
             used_domains.add(domain)
 
-    # 2. 高带宽 / 大流量优选：在剩余节点中取纯速度最高 Top 4
-    for item in sorted_by_speed:
+    # 若不足 4 个则顺延补齐
+    if len(best_list) < 4:
+        for item in by_speed:
+            if len(best_list) >= 4:
+                break
+            if item[2] not in used_domains:
+                best_list.append(item)
+                used_domains.add(item[2])
+
+    # 2. 高带宽 / 大流量优选：排除综合最佳已用的域名后，选取速度排名 Top4 的域名。
+    for item in by_speed:
         if len(bandwidth_list) >= 4:
             break
-        speed, avg, domain = item
-        if domain not in used_domains:
+        if item[2] not in used_domains:
             bandwidth_list.append(item)
-            used_domains.add(domain)
+            used_domains.add(item[2])
 
-    # 3. 极低延迟优选：在剩余节点中按延迟升序取 Top 4
-    sorted_by_latency = sorted(results, key=lambda x: (x[1], -x[0]))
-    for item in sorted_by_latency:
+    # 3. 极低延迟优选：排除已用域名后，按延迟从低到高排序，选取延迟 <100ms 的域名 Top4。如果不足4个则放宽到 <150ms 补齐，仍不足顺延。
+    by_latency = sorted(results, key=lambda x: (x[1], -x[0]))
+    # 第一梯队: < 100ms
+    for item in by_latency:
         if len(latency_list) >= 4:
             break
-        speed, avg, domain = item
-        if domain not in used_domains:
+        if item[1] < 100.0 and item[2] not in used_domains:
             latency_list.append(item)
-            used_domains.add(domain)
+            used_domains.add(item[2])
+
+    # 第二梯队: < 150ms
+    if len(latency_list) < 4:
+        for item in by_latency:
+            if len(latency_list) >= 4:
+                break
+            if item[1] < 150.0 and item[2] not in used_domains:
+                latency_list.append(item)
+                used_domains.add(item[2])
+
+    # 第三梯队: 任意剩余
+    if len(latency_list) < 4:
+        for item in by_latency:
+            if len(latency_list) >= 4:
+                break
+            if item[2] not in used_domains:
+                latency_list.append(item)
+                used_domains.add(item[2])
 
     return best_list, bandwidth_list, latency_list
 
 
+def format_skill_output(best_list, bandwidth_list, latency_list):
+    """严格按照 youxuanIP-analysis Skill 模板生成纯文本输出"""
+    lines = []
+    lines.append("按分类及纯域名列表整理如下，方便直接复制：\n")
+    lines.append("一、 综合最佳优选\n")
+    for s, a, d in best_list:
+        lines.append(d)
+    lines.append("\n二、 高带宽 / 大流量优选\n")
+    for s, a, d in bandwidth_list:
+        lines.append(d)
+    lines.append("\n三、 极低延迟优选\n")
+    for s, a, d in latency_list:
+        lines.append(d)
+
+    return "\n".join(lines)
+
+
+def analyze_existing_file(file_path):
+    """解析已有测速 txt 文件的分析模式"""
+    if not os.path.exists(file_path):
+        print(f"\n[错误] 文件未找到: {file_path}")
+        return
+
+    print(f"\n[+] 正在读取并分析测速数据文件: {file_path} ......")
+
+    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+        content = f.read()
+
+    pattern = re.compile(r'([\d\.]+)\s*MB/s\s*\|\s*([\d\.]+)\s*ms\s*[:：]\s*(\S+)')
+    parsed_results = []
+    for line in content.splitlines():
+        m = pattern.search(line)
+        if m:
+            speed = float(m.group(1))
+            latency = float(m.group(2))
+            domain = m.group(3).strip()
+            parsed_results.append((speed, latency, domain))
+
+    if not parsed_results:
+        print("[!] 错误: 文件内容不符合 `速度 MB/s | 延迟 ms : 域名` 测速格式，无法解析。")
+        return
+
+    print(f"[✔] 成功解析出 {len(parsed_results)} 条有效测速数据！\n")
+
+    best_list, bandwidth_list, latency_list = run_youxuan_analysis(parsed_results)
+    skill_text = format_skill_output(best_list, bandwidth_list, latency_list)
+
+    print("=" * 60)
+    print(skill_text)
+    print("=" * 60)
+
+    # 自动写入剪贴板（Termux:API）
+    if try_copy_to_clipboard(skill_text):
+        print("\n [📋] 已自动将上述分类纯节点复制到手机剪贴板！可以直接去粘贴使用。")
+
+    # 导出到文件
+    out_dir = get_output_dir()
+    clean_out = os.path.join(out_dir, "CDNym_clean.txt")
+    with open(clean_out, "w", encoding="utf-8") as f:
+        f.write(skill_text + "\n")
+
+    print(f"\n[✔] 分析结果已保存到: {clean_out}")
+
+
 def main():
+    # 检查是否有命令行参数（直接分析文件）
+    if len(sys.argv) > 1:
+        arg = sys.argv[1]
+        if arg == "--analyze" and len(sys.argv) > 2:
+            analyze_existing_file(sys.argv[2])
+            return
+        elif os.path.isfile(arg):
+            analyze_existing_file(arg)
+            return
+
     out_dir = get_output_dir()
     current_out = os.path.join(out_dir, OUTPUT_FILE)
     current_clean_out = os.path.join(out_dir, OUTPUT_CLEAN_FILE)
 
     print("\n" + "=" * 60)
-    print(" 🚀 CF-CDN 智能多网/多运营商 Cloudflare 真·测速工具")
+    print(" 🚀 CF-CDN 智能多网测速 & youxuanIP-analysis 综合工具")
+    print(" 📱 Termux 手机环境专属调优版 (支持一键复制与存储直读)")
     print("=" * 60)
-    print("\n 请选择你的宽带运营商（针对性优化路由与丢包）：\n")
+    print("\n 请选择功能模式：\n")
     print("  1️⃣  中国电信 (China Telecom) -> 优选美西直连/大带宽抗丢包节点")
     print("  2️⃣  中国移动 (China Mobile)   -> 优选香港/新加坡/亚洲CMI低延迟节点")
     print("  3️⃣  中国联通 (China Unicom)   -> 优选美西/日本软银4837节点")
     print("  4️⃣  三网全量 / 综合通用测速   -> 包含全部节点库与三网在线API")
+    print("  5️⃣  导入已有测速文件进行分析 (youxuanIP-analysis 模式)")
     print("")
 
     while True:
         try:
-            isp_choice = input(" 请输入运营商编号 1 / 2 / 3 / 4 (默认: 4 全网通用): ").strip()
+            choice = input(" 请输入选项编号 1 / 2 / 3 / 4 / 5 (默认: 4 全网通用): ").strip()
         except (EOFError, KeyboardInterrupt):
-            isp_choice = "4"
-        if isp_choice in ("1", "2", "3", "4"):
+            choice = "4"
+        if choice in ("1", "2", "3", "4", "5"):
             break
-        elif isp_choice == "":
-            isp_choice = "4"
+        elif choice == "":
+            choice = "4"
             break
         else:
-            print(" ⚠️  请输入 1、2、3 或 4")
+            print(" ⚠️  请输入 1、2、3、4 或 5")
 
-    selected_isp = ISP_CONFIG[isp_choice]
+    # 如果选 5: 文件分析模式
+    if choice == "5":
+        try:
+            default_file = os.path.join(out_dir, OUTPUT_FILE)
+            prompt_file = f" 请输入测速 txt 文件路径 (默认: {default_file}): "
+            f_path = input(prompt_file).strip()
+            if not f_path:
+                f_path = default_file
+            analyze_existing_file(f_path)
+            return
+        except (EOFError, KeyboardInterrupt):
+            return
+
+    selected_isp = ISP_CONFIG[choice]
 
     print("\n" + "-" * 60)
     print(f" 已选择: 【{selected_isp['name']}】({selected_isp['desc']})")
@@ -550,7 +665,7 @@ def main():
             print(" ⚠️  请输入 1、2 或 3")
 
     # 1. 动态拉取在线 API + 加载节点
-    nodes = load_candidate_nodes(isp_choice, limit=limit_count)
+    nodes = load_candidate_nodes(choice, limit=limit_count)
     if not nodes:
         print("[!] 错误: 未能加载到有效节点，请检查网络或 domains.txt 文件。")
         return
@@ -577,7 +692,6 @@ def main():
     ping_results.sort(key=lambda x: x[0])
     threshold = selected_isp["ping_threshold"]
 
-    # 根据运营商专属门槛筛选进入阶段二的候选节点
     top_candidates = [item for item in ping_results if item[0] <= threshold]
     if len(top_candidates) < 10:
         top_candidates = ping_results[:25]
@@ -601,8 +715,8 @@ def main():
         print("\n[!] 提示: 本轮未测得有效下载带宽节点，可能是晚高峰网络波动，建议稍后重试。")
         return
 
-    # 4. 智能分类
-    best_list, bandwidth_list, latency_list = categorize_results(final_results)
+    # 4. youxuanIP-analysis 智能分类
+    best_list, bandwidth_list, latency_list = run_youxuan_analysis(final_results)
 
     # 5. 详细数据表格视图
     print("\n" + "=" * 60)
@@ -611,60 +725,44 @@ def main():
     for speed, avg, domain in sorted(final_results, key=lambda x: (-x[0], x[1])):
         print(f"  {domain:<35} | 带宽: {speed:5.2f} MB/s | 延迟: {avg:5.1f} ms")
 
-    # 6. 按分类及纯域名/IP 列表输出（方便直接复制）
+    # 6. youxuanIP-analysis 标准纯文本输出
+    skill_output_text = format_skill_output(best_list, bandwidth_list, latency_list)
+
     print("\n" + "=" * 60)
-    print(" 📋 按分类纯节点列表整理如下，方便直接长按复制：")
-    print("=" * 60 + "\n")
-
-    print("一、 综合最佳优选")
-    for s, a, d in best_list:
-        print(d)
-    print("")
-
-    print("二、 高带宽 / 大流量优选")
-    for s, a, d in bandwidth_list:
-        print(d)
-    print("")
-
-    print("三、 极低延迟优选")
-    for s, a, d in latency_list:
-        print(d)
-    print("")
-
+    print(skill_output_text)
     print("=" * 60)
+
+    # 自动写入剪贴板（Termux:API）
+    if try_copy_to_clipboard(skill_output_text):
+        print("\n [📋] 已自动将上述分类纯节点复制到手机剪贴板！可以直接去粘贴使用。")
 
     # 7. 保存文件
     out_lines = []
-    clean_lines = []
-
     out_lines.append(f"# CF-CDN 测速结果 [{selected_isp['name']}] - {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
     out_lines.append("一、 综合最佳优选\n")
     for s, a, d in best_list:
         out_lines.append(f"{s:.2f} MB/s | {a:.1f} ms : {d}\n")
-        clean_lines.append(f"{d}\n")
     out_lines.append("\n二、 高带宽 / 大流量优选\n")
     for s, a, d in bandwidth_list:
         out_lines.append(f"{s:.2f} MB/s | {a:.1f} ms : {d}\n")
-        clean_lines.append(f"{d}\n")
     out_lines.append("\n三、 极低延迟优选\n")
     for s, a, d in latency_list:
         out_lines.append(f"{s:.2f} MB/s | {a:.1f} ms : {d}\n")
-        clean_lines.append(f"{d}\n")
 
     with open(current_out, "w", encoding="utf-8") as f:
         f.writelines(out_lines)
 
     with open(current_clean_out, "w", encoding="utf-8") as f:
-        f.writelines(clean_lines)
+        f.write(skill_output_text + "\n")
 
     print("\n" + "-" * 60)
     print(" 💡 客户端填法防坑指引：")
     print("  • 【连接地址 / Address】：填上方测出来的优选 IP 或优选域名")
     print("  • 【伪装域名 / Host / SNI】：必须填你自己节点的真实域名（保证证书有效）")
     print("  • 【端口 / Port】：支持 443 / 8443 / 2053 / 2083 / 2087 / 2096 等")
-    print(f"\n 📁 结果已自动保存到:")
-    print(f"  📌 纯节点列表: {current_clean_out}")
-    print(f"  📌 详细速度表: {current_out}")
+    print(f"\n 📁 结果已自动保存到手机内部存储（手机文件管理器直接可见）:")
+    print(f"  📌 youxuanIP-analysis 标准分类文件: {current_clean_out}")
+    print(f"  📌 详细速度报告: {current_out}")
     print("-" * 60 + "\n")
 
 
