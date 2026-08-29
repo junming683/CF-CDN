@@ -651,20 +651,32 @@ def main():
     print("  3️⃣  中国联通 (China Unicom)   -> 优选美西/日本软银4837节点")
     print("  4️⃣  三网全量 / 综合通用测速   -> 包含全部节点库与三网在线API")
     print("  5️⃣  导入已有测速文件进行分析 (youxuanIP-analysis 模式)")
+    print("  6️⃣  VLESS 订阅节点真实测速与重排 (自动写入手机剪贴板)")
     print("")
 
     while True:
         try:
-            choice = input(" 请输入选项编号 1 / 2 / 3 / 4 / 5 (默认: 4 全网通用): ").strip()
+            choice = input(" 请输入选项编号 1 / 2 / 3 / 4 / 5 / 6 (默认: 4 全网通用): ").strip()
         except (EOFError, KeyboardInterrupt):
             choice = "4"
-        if choice in ("1", "2", "3", "4", "5"):
+        if choice in ("1", "2", "3", "4", "5", "6"):
             break
         elif choice == "":
             choice = "4"
             break
         else:
-            print(" ⚠️  请输入 1、2、3、4 或 5")
+            print(" ⚠️  请输入 1、2、3、4、5 或 6")
+
+    # 如果选 6: VLESS 订阅节点测速与重排模式
+    if choice == "6":
+        try:
+            import sub_speedtest
+            sub_speedtest.main()
+        except ImportError:
+            sys.path.insert(0, SCRIPT_DIR)
+            import sub_speedtest
+            sub_speedtest.main()
+        return
 
     # 如果选 5: 文件分析模式
     if choice == "5":
