@@ -8,14 +8,15 @@ CF-CDN 扩展模块：VLESS 订阅节点真实代理测速与智能排序工具
   1. 支持按分类拉取订阅（移动优选 / 电信优选 / 直连节点库 / 全量合并）
   2. 白名单拉取订阅 -> 纯内存暂存 -> 通知栏断开 VPN 交互 -> 本地真实网络直连测速
   3. 原生 Socket + TLS + WebSocket + VLESS 协议握手，5 线程轻量并发
-  4. 测速完成后自动按真实下行速率降序排列，节点名称追加 [xx.xxMB/s] 前缀
-  5. 自动调用 termux-clipboard-set 写入手机剪贴板
-  6. 全流程内存无痕，不落地敏感订阅信息
+  4. 测速完成后自动剔除离线/测速失败节点，按真实下行速率降序排列并追加 [xx.xxMB/s] 前缀
+  5. 自动调用 termux-clipboard-set 写入手机剪贴板（需 pkg install termux-api + Termux:API 应用）
+  6. 订阅自动备份到 /sdcard/CF-CDN/，剪贴板不可用时逐条打印节点链接方便手动复制
 """
 
 import base64
 import os
 import re
+import shutil
 import socket
 import ssl
 import struct
@@ -75,13 +76,28 @@ def get_auth_headers():
 
 
 def copy_to_clipboard(text):
-    """尝试将结果写入 Termux 剪贴板"""
+    """将结果写入 Termux 剪贴板（需 termux-api 包 + Termux:API 应用同时安装）"""
+    if not shutil.which("termux-clipboard-set"):
+        return False
     try:
-        p = subprocess.Popen(["termux-clipboard-set"], stdin=subprocess.PIPE)
-        p.communicate(input=text.encode("utf-8"))
-        return True
+        p = subprocess.Popen(["termux-clipboard-set"], stdin=subprocess.PIPE,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        p.communicate(input=text.encode("utf-8"), timeout=10)
+        return p.returncode == 0
     except Exception:
         return False
+
+
+def get_output_dir():
+    """获取输出目录：Termux 保存到 /sdcard/CF-CDN/（文件管理器直接可见），其他系统用脚本目录"""
+    if os.path.exists("/sdcard"):
+        try:
+            out_dir = "/sdcard/CF-CDN"
+            os.makedirs(out_dir, exist_ok=True)
+            return out_dir
+        except Exception:
+            pass
+    return os.path.dirname(os.path.abspath(__file__))
 
 
 def fetch_single_file(sub_file):
@@ -348,20 +364,19 @@ def test_single_node(node):
     return node
 
 
-def build_final_subscription(sorted_nodes):
-    """重构节点名称并生成最终 Base64 订阅文本"""
-    output_lines = []
-    for node in sorted_nodes:
-        # 去除可能已存在的旧测速标签
-        clean_name = re.sub(r"^\[\d+(\.\d+)?MB/s\]-", "", node["name"])
-        speed_label = f"[{node['speed']:.2f}MB/s]" if node["speed"] > 0 else "[OFFLINE]"
-        new_name = f"{speed_label}-{clean_name}"
-        encoded_name = urllib.parse.quote(new_name)
+def build_link(node):
+    """重构节点名称并生成单条 VLESS 链接"""
+    # 去除可能已存在的旧测速标签
+    clean_name = re.sub(r"^\[\d+(\.\d+)?MB/s\]-", "", node["name"])
+    speed_label = f"[{node['speed']:.2f}MB/s]" if node["speed"] > 0 else "[OFFLINE]"
+    new_name = f"{speed_label}-{clean_name}"
+    encoded_name = urllib.parse.quote(new_name)
+    return f"vless://{node['uuid']}@{node['host']}:{node['port']}?{node['params_str']}#{encoded_name}"
 
-        new_link = f"vless://{node['uuid']}@{node['host']}:{node['port']}?{node['params_str']}#{encoded_name}"
-        output_lines.append(new_link)
 
-    plain_sub = "\n".join(output_lines)
+def build_final_subscription(online_nodes):
+    """生成最终 Base64 订阅文本（调用方需保证只传入测速成功的在线节点）"""
+    plain_sub = "\n".join(build_link(node) for node in online_nodes)
     return base64.b64encode(plain_sub.encode("utf-8")).decode("utf-8")
 
 
@@ -390,17 +405,36 @@ def main():
     # 优先按速度降序；速度相同时按延迟升序
     sorted_nodes = sorted(tested_nodes, key=lambda x: (x["speed"], -x["latency"]), reverse=True)
 
-    online_count = sum(1 for n in sorted_nodes if n["speed"] > 0)
-    print(f"[+] 测速完成：可用节点 {online_count}/{len(sorted_nodes)}")
+    # 只保留测速成功的在线节点，离线/测速失败节点全部剔除
+    online_nodes = [n for n in sorted_nodes if n["speed"] > 0]
+    offline_count = len(sorted_nodes) - len(online_nodes)
+    print(f"[+] 测速完成：可用节点 {len(online_nodes)}/{len(sorted_nodes)}，已剔除 {offline_count} 个离线/测速失败节点")
 
-    print("\n[4/4] 重新编码并导出订阅...")
-    final_base64 = build_final_subscription(sorted_nodes)
+    if not online_nodes:
+        print("\n[!] 所有节点均测速失败，本次不生成订阅（避免清空客户端节点），请检查网络后重试。")
+        return
+
+    print("\n[4/4] 重新编码并导出订阅（仅含在线节点）...")
+    final_base64 = build_final_subscription(online_nodes)
+
+    # 同步备份到本地文件（Termux 下位于 /sdcard/CF-CDN/，文件管理器直接可见）
+    out_dir = get_output_dir()
+    out_file = os.path.join(out_dir, f"VLESS订阅-{time.strftime('%Y%m%d-%H%M%S')}.txt")
+    try:
+        with open(out_file, "w", encoding="utf-8") as f:
+            f.write(final_base64)
+        print(f"📁 订阅已备份到: {out_file}")
+    except Exception as e:
+        print(f"[!] 订阅备份保存失败: {e}")
 
     if copy_to_clipboard(final_base64):
-        print("\n✅ 已成功将重排后的 Base64 订阅写入手机剪贴板！可以直接去客户端粘贴导入。")
+        print(f"\n✅ 已剔除全部离线节点，{len(online_nodes)} 个在线节点的订阅已写入手机剪贴板，去客户端粘贴导入即可！")
     else:
-        print("\n[+] 最终 Base64 订阅内容如下（长按复制）：\n")
-        print(final_base64)
+        print("\n[⚠] 未检测到可用的 termux-clipboard-set，无法自动写入剪贴板。")
+        print("    想启用一键复制：Termux 里执行 pkg install termux-api ，并安装 Termux:API 应用后重跑本工具。")
+        print("    目前可以：① 部分客户端支持「从文件导入」上面的备份文件；② 长按逐条复制下面的节点链接：\n")
+        for node in online_nodes:
+            print(build_link(node))
 
 
 if __name__ == "__main__":
