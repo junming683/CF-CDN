@@ -41,6 +41,7 @@ OUTPUT_CLEAN_FILE = "CDNym_clean.txt"
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DOMAIN_FILE = os.path.join(SCRIPT_DIR, "domains.txt")
+E2E_CONFIG_FILE = os.path.join(SCRIPT_DIR, "mynode.ini")
 
 # vps789 API 授权 Token
 VPS789_TOKEN = "1V1B837SN4VBG42SC1X83DHJ0SMTR8SK"
@@ -185,6 +186,38 @@ def is_valid_target(item):
         if not any(s.lower().endswith(ext) for ext in ['.mb', '.kb', '.ms', '.b/s', '.b']):
             return True
     return False
+
+
+def load_e2e_config():
+    """读取端到端真实链路测速配置 mynode.ini（私有文件，已被 .gitignore 忽略）
+
+    格式：
+        domain=你的域名
+        path=/test.bin
+    配置存在且合法时，下载测速改为「候选IP + 你的域名作 SNI/Host」拉取你自己
+    VPS 上的文件，测出 手机→CF边缘→回源VPS 完整链路的真实速度。
+    """
+    if not os.path.exists(E2E_CONFIG_FILE):
+        return None
+    domain = None
+    path = "/test.bin"
+    try:
+        with open(E2E_CONFIG_FILE, "r", encoding="utf-8", errors="ignore") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                key, val = key.strip().lower(), val.strip()
+                if key == "domain" and val:
+                    domain = re.sub(r'^https?://', '', val).split("/")[0]
+                elif key == "path" and val:
+                    path = val if val.startswith("/") else "/" + val
+    except Exception:
+        return None
+    if domain and is_valid_target(domain):
+        return (domain, path)
+    return None
 
 
 def fetch_online_apis(isp_key):
@@ -367,10 +400,26 @@ def ping_domain(domain):
     return None
 
 
-def test_download_speed_single(item, duration=2.5):
-    """单节点真·下载带宽测速 (MB/s)"""
+def test_download_speed_single(item, duration=2.5, e2e=None):
+    """单节点真·下载带宽测速 (MB/s)
+
+    e2e=(domain, path) 时启用端到端模式：SNI/Host 换成你自己的域名，
+    下载你 VPS 上的文件，测的是 手机→CF边缘→回源VPS 的完整真实链路。
+    """
     avg, domain = item
     speed_mb = 0.0
+
+    if e2e:
+        sni, path = e2e
+        # 固定纯字母参数：绕开 CF 边缘可能残留的旧 301 缓存，同时避开 WAF 对特殊符号的拦截
+        sep = "&" if "?" in path else "?"
+        req_path = f"{path}{sep}bypass=cfcdn"
+        # Range 限 30MB：候选多时防止把手机流量跑爆；206 = Range 命中，同样算成功
+        req_headers = {'Host': sni, 'User-Agent': 'Mozilla/5.0', 'Range': 'bytes=0-31457279'}
+    else:
+        sni = "speed.cloudflare.com"
+        req_path = "/__down?bytes=50000000"
+        req_headers = {'Host': sni, 'User-Agent': 'Mozilla/5.0'}
 
     try:
         addr_info = socket.getaddrinfo(domain, 443, proto=socket.IPPROTO_TCP)
@@ -380,15 +429,15 @@ def test_download_speed_single(item, duration=2.5):
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
 
-            sock = socket.create_connection((target_ip, 443), timeout=3.0)
-            ssock = ctx.wrap_socket(sock, server_hostname='speed.cloudflare.com')
+            sock = socket.create_connection((target_ip, 443), timeout=5.0)
+            ssock = ctx.wrap_socket(sock, server_hostname=sni)
 
-            conn = http.client.HTTPSConnection(target_ip, port=443, context=ctx, timeout=3.0)
+            conn = http.client.HTTPSConnection(target_ip, port=443, context=ctx, timeout=5.0)
             conn.sock = ssock
-            conn.request('GET', '/__down?bytes=50000000', headers={'Host': 'speed.cloudflare.com', 'User-Agent': 'Mozilla/5.0'})
+            conn.request('GET', req_path, headers=req_headers)
             resp = conn.getresponse()
 
-            if resp.status == 200:
+            if resp.status in (200, 206):
                 downloaded = 0
                 start_t = time.time()
                 while time.time() - start_t < duration:
@@ -406,7 +455,7 @@ def test_download_speed_single(item, duration=2.5):
     except Exception:
         pass
 
-    if speed_mb <= 0.0 and not (domain.replace('.', '').isdigit() or ':' in domain):
+    if speed_mb <= 0.0 and e2e is None and not (domain.replace('.', '').isdigit() or ':' in domain):
         try:
             req = urllib.request.Request(
                 f"https://{domain}/",
@@ -664,6 +713,23 @@ def main():
         else:
             print(" ⚠️  请输入 1、2 或 3")
 
+    # 端到端真实链路测速：检测到 mynode.ini 时，可改用「候选IP + 你的域名」
+    # 下载你自己 VPS 上的文件，测出 手机→CF→你VPS 的完整真实速度
+    e2e_target = None
+    e2e_cfg = load_e2e_config()
+    if e2e_cfg:
+        print(f"\n 检测到私有配置 mynode.ini: {e2e_cfg[0]}{e2e_cfg[1]}")
+        print(" 端到端模式 = 通过候选IP下载你自己VPS上的文件（真实使用路径）")
+        try:
+            ans = input(" 是否启用端到端真实链路测速？Y/n (默认: Y): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            ans = ""
+        if ans in ("", "y", "yes"):
+            e2e_target = e2e_cfg
+            print(" ✔ 已启用端到端模式，单节点测速 8 秒（测持续吞吐，非瞬时峰值）")
+        else:
+            print(" ↩ 已跳过，仍使用 Cloudflare 官方测速文件")
+
     # 1. 动态拉取在线 API + 加载节点
     nodes = load_candidate_nodes(choice, limit=limit_count)
     if not nodes:
@@ -698,14 +764,19 @@ def main():
     elif len(top_candidates) > 60:
         top_candidates = top_candidates[:60]
 
+    # 端到端模式下载的是自家 VPS 的真实文件，候选举 30 个封顶，控制总流量
+    if e2e_target and len(top_candidates) > 30:
+        top_candidates = top_candidates[:30]
+
     print("\n" + "=" * 60)
     print(f" 阶段二：精选出 {len(top_candidates)} 个有效候选节点，正在并发测试真实下载带宽 (MB/s)......")
     print("=" * 60 + "\n")
 
     # 3. 阶段二：真实下载测速
     final_results = []
+    dl_duration = 8.0 if e2e_target else 2.5
     with concurrent.futures.ThreadPoolExecutor(max_workers=download_workers) as executor:
-        futures = [executor.submit(test_download_speed_single, item) for item in top_candidates]
+        futures = [executor.submit(test_download_speed_single, item, dl_duration, e2e_target) for item in top_candidates]
         for future in concurrent.futures.as_completed(futures):
             speed, avg, domain = future.result()
             if speed > 0.0:
