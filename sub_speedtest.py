@@ -2,14 +2,15 @@
 # -*- coding: utf-8 -*-
 
 """
-CF-CDN 扩展模块：VLESS 节点真实代理测速与智能排序工具
+CF-CDN 扩展模块：VLESS 订阅节点真实代理测速与智能排序工具
 运行环境：Android Termux / Linux
 功能特性：
-  1. 白名单拉取订阅 -> 纯内存暂存 -> 通知栏断开 VPN 交互 -> 本地真实网络直连测速
-  2. 原生 Socket + TLS + WebSocket + VLESS 协议握手，5 线程轻量并发
-  3. 测速完成后自动按真实下行速率降序排列，节点名称追加 [xx.xxMB/s] 前缀
-  4. 自动调用 termux-clipboard-set 写入手机剪贴板
-  5. 全流程内存无痕，不落地敏感订阅信息
+  1. 支持按分类拉取订阅（移动优选 / 电信优选 / 直连节点库 / 全量合并）
+  2. 白名单拉取订阅 -> 纯内存暂存 -> 通知栏断开 VPN 交互 -> 本地真实网络直连测速
+  3. 原生 Socket + TLS + WebSocket + VLESS 协议握手，5 线程轻量并发
+  4. 测速完成后自动按真实下行速率降序排列，节点名称追加 [xx.xxMB/s] 前缀
+  5. 自动调用 termux-clipboard-set 写入手机剪贴板
+  6. 全流程内存无痕，不落地敏感订阅信息
 """
 
 import base64
@@ -19,6 +20,7 @@ import socket
 import ssl
 import struct
 import subprocess
+import sys
 import time
 import urllib.parse
 import urllib.request
@@ -27,7 +29,30 @@ from concurrent.futures import ThreadPoolExecutor
 
 # ================= 基础配置 =================
 BASE_URL = "https://dingyue.042499.xyz:8443"
-SUB_FILE = "sub.txt"
+
+# 订阅源分类定义
+SUB_SOURCES = {
+    "1": {
+        "name": "中国移动优选 (sub.txt)",
+        "file": "sub.txt",
+        "desc": "移动优选 · Base64 / 节点列表"
+    },
+    "2": {
+        "name": "中国电信优选 (sub_yaml.txt)",
+        "file": "sub_yaml.txt",
+        "desc": "电信优选 · Clash / 节点列表"
+    },
+    "3": {
+        "name": "直连节点库 (sub_yaml_android.txt)",
+        "file": "sub_yaml_android.txt",
+        "desc": "直连/混合节点库"
+    },
+    "4": {
+        "name": "全量合并测速 (合并 1+2+3 并去重)",
+        "file": "__ALL__",
+        "desc": "三网与直连全量节点"
+    }
+}
 
 # Nginx Basic 认证凭据（若无密码请留空字符串）
 NGINX_USER = "admin"
@@ -59,63 +84,143 @@ def copy_to_clipboard(text):
         return False
 
 
-def fetch_sub_to_memory():
-    """内存拉取订阅并触发交互暂停"""
-    url = f"{BASE_URL}/{SUB_FILE}"
+def fetch_single_file(sub_file):
+    """单文件内存拉取"""
+    url = f"{BASE_URL}/{sub_file}" if not sub_file.startswith("http") else sub_file
     req = urllib.request.Request(url, headers=get_auth_headers())
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
 
-    print(f"[1/4] 正在拉取订阅: {url} ...")
+    print(f"  [>] 正在拉取订阅: {url} ...")
     try:
         with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
             raw_data = resp.read().decode("utf-8", errors="ignore").strip()
-
-        if not raw_data:
-            print("[!] 订阅内容为空，请检查网络或认证配置")
-            return ""
-
-        print("[+] 订阅数据已成功载入内存！")
-        print("\n" + "=" * 56)
-        print(" [🔔 操作提示] ")
-        print(" 订阅已载入内存。请立即【下拉手机通知栏断开 VPN】！")
-        print(" 断开后回到 Termux 按 [回车键]，开始真实网络测速。")
-        print("=" * 56)
-        input("👉 确认已断开 VPN 后按回车继续: ")
-        return raw_data
+            return raw_data
     except Exception as e:
-        print(f"[!] 拉取失败: {e}")
+        print(f"  [!] 拉取 {sub_file} 失败: {e}")
         return ""
 
 
+def select_subscription_source():
+    """交互选择订阅源"""
+    print("\n" + "=" * 60)
+    print(" 📡 请选择要拉取测速的订阅源分类：")
+    print("=" * 60)
+    for k, v in SUB_SOURCES.items():
+        print(f"  {k}️⃣  {v['name']}  -->  {v['desc']}")
+    print("  5️⃣  自定义订阅链接 / 文件名")
+    print("")
+
+    while True:
+        try:
+            choice = input(" 请输入选项 1 / 2 / 3 / 4 / 5 (默认: 1 移动优选): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            choice = "1"
+        if choice in ("1", "2", "3", "4"):
+            return SUB_SOURCES[choice]["file"], SUB_SOURCES[choice]["name"]
+        elif choice == "5":
+            try:
+                custom = input(" 请输入订阅文件路径或完整 URL (如 sub.txt): ").strip()
+                if not custom:
+                    custom = "sub.txt"
+                return custom, f"自定义源 ({custom})"
+            except (EOFError, KeyboardInterrupt):
+                return "sub.txt", SUB_SOURCES["1"]["name"]
+        elif choice == "":
+            return SUB_SOURCES["1"]["file"], SUB_SOURCES["1"]["name"]
+        else:
+            print(" ⚠️  请输入有效选项编号 1 ~ 5")
+
+
+def fetch_sub_to_memory():
+    """内存拉取订阅并触发 VPN 断开交互暂停"""
+    sub_target, sub_label = select_subscription_source()
+
+    print(f"\n[1/4] 正在拉取【{sub_label}】...")
+
+    raw_contents = []
+    if sub_target == "__ALL__":
+        for key in ("1", "2", "3"):
+            fname = SUB_SOURCES[key]["file"]
+            content = fetch_single_file(fname)
+            if content:
+                raw_contents.append(content)
+    else:
+        content = fetch_single_file(sub_target)
+        if content:
+            raw_contents.append(content)
+
+    if not raw_contents:
+        print("[!] 订阅内容为空，请检查网络或认证配置")
+        return ""
+
+    merged_raw = "\n".join(raw_contents)
+    print("[+] 订阅数据已成功载入内存！")
+    print("\n" + "=" * 58)
+    print(" [🔔 操作提示] ")
+    print(" 订阅已拉取并暂存于内存。请立即【下拉手机通知栏断开 VPN】！")
+    print(" 断开 VPN 后回到 Termux 按 [回车键]，使用手机真实网络直连测速。")
+    print("=" * 58)
+    try:
+        input("👉 确认已断开 VPN 后按回车继续: ")
+    except (EOFError, KeyboardInterrupt):
+        pass
+    return merged_raw
+
+
 def parse_vless_nodes(raw_content):
-    """解析 Base64 或明文 VLESS 节点列表"""
+    """解析 Base64 或明文 VLESS 节点列表并自动去重"""
     content = raw_content
-    if not content.startswith("vless://"):
+    # 若整体为 Base64 则先解码
+    if not any(k in content for k in ("vless://", "vmess://", "trojan://", "hysteria2://", "hy2://")):
         try:
             content = base64.b64decode(content).decode("utf-8", errors="ignore")
         except Exception:
             pass
 
     nodes = []
+    seen_keys = set()
+
     for line in content.splitlines():
         line = line.strip()
+        # 去除 YAML 行前导符
+        if line.startswith("- "):
+            line = line[2:].strip()
         if not line.startswith("vless://"):
             continue
+
         m = re.search(r"vless://([^@]+)@([^:]+):(\d+)\?([^#]+)#(.*)$", line)
         if m:
-            params = dict(urllib.parse.parse_qsl(m.group(4).strip()))
+            user_uuid = m.group(1).strip()
+            host = m.group(2).strip()
+            port = int(m.group(3).strip())
+            params_str = m.group(4).strip()
+            raw_name = m.group(5).strip()
+
+            params = dict(urllib.parse.parse_qsl(params_str))
+            net_type = params.get("type", "ws").lower()
+            security = params.get("security", "tls").lower()
+
+            # 仅对支持纯 Socket TLS/WS 握手的节点进行真实吞吐量测速
+            is_testable = (net_type == "ws" and security in ("tls", "none"))
+
+            dedup_key = (user_uuid, host, port, params.get("path", "/"))
+            if dedup_key in seen_keys:
+                continue
+            seen_keys.add(dedup_key)
+
             nodes.append({
                 "raw": line,
-                "uuid": m.group(1).strip(),
-                "host": m.group(2).strip(),
-                "port": int(m.group(3).strip()),
-                "params_str": m.group(4).strip(),
+                "uuid": user_uuid,
+                "host": host,
+                "port": port,
+                "params_str": params_str,
                 "path": params.get("path", "/"),
-                "sni": params.get("sni", m.group(2).strip()),
-                "ws_host": params.get("host", params.get("sni", m.group(2).strip())),
-                "name": urllib.parse.unquote(m.group(5).strip()),
+                "sni": params.get("sni", host),
+                "ws_host": params.get("host", params.get("sni", host)),
+                "name": urllib.parse.unquote(raw_name),
+                "is_testable": is_testable,
                 "speed": 0.0,
                 "latency": 9999.0
             })
@@ -124,6 +229,13 @@ def parse_vless_nodes(raw_content):
 
 def test_single_node(node):
     """纯 Python 底层 Socket 模拟 VLESS+WS+TLS 发起真实下载测速"""
+    if not node.get("is_testable", True):
+        # 非 WS+TLS 协议（如 Reality / TCP）无法通过纯 WS 握手测速，保留原状
+        node["speed"] = 0.0
+        node["latency"] = 8888.0
+        print(f"  [ SKIPPED ] {node['name'][:28]} (非 WS+TLS 协议)")
+        return node
+
     host = node["host"]
     port = node["port"]
     user_uuid = node["uuid"]
@@ -262,7 +374,7 @@ def main():
         print("[!] 未解析到有效 VLESS 节点")
         return
 
-    print(f"\n[2/4] 解析出 {len(nodes)} 个节点，启动 {CONCURRENT_LIMIT} 线程并发测速...")
+    print(f"\n[2/4] 共载入 {len(nodes)} 个独立节点，启动 {CONCURRENT_LIMIT} 线程并发测速...")
     tested_nodes = []
     with ThreadPoolExecutor(max_workers=CONCURRENT_LIMIT) as executor:
         results = executor.map(test_single_node, nodes)

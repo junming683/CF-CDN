@@ -651,7 +651,7 @@ def main():
     print("  3️⃣  中国联通 (China Unicom)   -> 优选美西/日本软银4837节点")
     print("  4️⃣  三网全量 / 综合通用测速   -> 包含全部节点库与三网在线API")
     print("  5️⃣  导入已有测速文件进行分析 (youxuanIP-analysis 模式)")
-    print("  6️⃣  VLESS 订阅节点真实测速与重排 (自动写入手机剪贴板)")
+    print("  6️⃣  VLESS 订阅节点真实测速与重排 (移动/电信/直连/全量 · 写入剪贴板)")
     print("")
 
     while True:
