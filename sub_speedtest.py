@@ -60,8 +60,8 @@ NGINX_PASS = "your_password"
 
 # 测速参数
 CONCURRENT_LIMIT = 5            # 并发线程数
-TEST_BYTES = 3 * 1024 * 1024     # 单节点测速流量：3MB
-TEST_TIMEOUT = 4.0               # 单节点超时时间（秒）
+TEST_BYTES = 2 * 1024 * 1024     # 单节点测速流量：2MB
+TEST_TIMEOUT = 5.0               # 单节点超时时间（秒）
 TARGET_HOST = "speed.cloudflare.com"
 TARGET_PORT = 80
 
@@ -205,10 +205,15 @@ def parse_vless_nodes(raw_content):
             # 仅对支持纯 Socket TLS/WS 握手的节点进行真实吞吐量测速
             is_testable = (net_type == "ws" and security in ("tls", "none"))
 
-            dedup_key = (user_uuid, host, port, params.get("path", "/"))
+            dedup_key = (user_uuid, host, port, urllib.parse.unquote(params.get("path", "/")))
             if dedup_key in seen_keys:
                 continue
             seen_keys.add(dedup_key)
+
+            raw_path = params.get("path", "/")
+            clean_path = urllib.parse.unquote(raw_path)
+            if not clean_path.startswith("/"):
+                clean_path = "/" + clean_path
 
             nodes.append({
                 "raw": line,
@@ -216,7 +221,7 @@ def parse_vless_nodes(raw_content):
                 "host": host,
                 "port": port,
                 "params_str": params_str,
-                "path": params.get("path", "/"),
+                "path": clean_path,
                 "sni": params.get("sni", host),
                 "ws_host": params.get("host", params.get("sni", host)),
                 "name": urllib.parse.unquote(raw_name),
@@ -252,8 +257,8 @@ def test_single_node(node):
         ssl_ctx.verify_mode = ssl.CERT_NONE
         sock = ssl_ctx.wrap_socket(raw_sock, server_hostname=sni if sni else host)
 
-        # 2. 发起 WebSocket 升级握手
-        ws_key = base64.b64encode(b"termux_test_key").decode()
+        # 2. 发起 WebSocket 升级握手 (Sec-WebSocket-Key 必须是 16 字节随机二进制 Base64)
+        ws_key = base64.b64encode(os.urandom(16)).decode()
         ws_req = (
             f"GET {path} HTTP/1.1\r\n"
             f"Host: {ws_host}\r\n"
@@ -292,7 +297,7 @@ def test_single_node(node):
         p_len = len(payload)
 
         # 4. 封装 WebSocket 二进制掩码帧 (Opcode 0x82)
-        mask = b"\x12\x34\x56\x78"
+        mask = os.urandom(4)
         frame = bytearray([0x82])
         if p_len < 126:
             frame.append(0x80 | p_len)
