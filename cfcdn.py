@@ -43,8 +43,8 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DOMAIN_FILE = os.path.join(SCRIPT_DIR, "domains.txt")
 E2E_CONFIG_FILE = os.path.join(SCRIPT_DIR, "mynode.ini")
 
-# vps789 API 授权 Token
-VPS789_TOKEN = "1V1B837SN4VBG42SC1X83DHJ0SMTR8SK"
+# vps789 API 授权 Token（优先取环境变量 VPS789_TOKEN，未设置时用内置的免费公共 token）
+VPS789_TOKEN = os.environ.get("VPS789_TOKEN") or "1V1B837SN4VBG42SC1X83DHJ0SMTR8SK"
 
 # ================= 运营商专属配置与在线 API =================
 
