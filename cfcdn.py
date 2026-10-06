@@ -405,9 +405,13 @@ def test_download_speed_single(item, duration=2.5, e2e=None):
 
     e2e=(domain, path) 时启用端到端模式：SNI/Host 换成你自己的域名，
     下载你 VPS 上的文件，测的是 手机→CF边缘→回源VPS 的完整真实链路。
+
+    返回 (speed, avg, domain, status)，status 细分失败原因：
+    ok / timeout / tls / http_XXX / dns / other
     """
     avg, domain = item
     speed_mb = 0.0
+    status = "other"
 
     if e2e:
         sni, path = e2e
@@ -423,37 +427,49 @@ def test_download_speed_single(item, duration=2.5, e2e=None):
 
     try:
         addr_info = socket.getaddrinfo(domain, 443, proto=socket.IPPROTO_TCP)
-        if addr_info:
-            target_ip = addr_info[0][4][0]
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
+        if not addr_info:
+            return (0.0, avg, domain, "dns")
+        target_ip = addr_info[0][4][0]
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
 
-            sock = socket.create_connection((target_ip, 443), timeout=5.0)
-            ssock = ctx.wrap_socket(sock, server_hostname=sni)
+        # 连接超时 8 秒：晚高峰跨境 TLS 握手普遍偏慢，5 秒会误杀大量可通节点
+        sock = socket.create_connection((target_ip, 443), timeout=8.0)
+        ssock = ctx.wrap_socket(sock, server_hostname=sni)
 
-            conn = http.client.HTTPSConnection(target_ip, port=443, context=ctx, timeout=5.0)
-            conn.sock = ssock
-            conn.request('GET', req_path, headers=req_headers)
-            resp = conn.getresponse()
+        conn = http.client.HTTPSConnection(target_ip, port=443, context=ctx, timeout=8.0)
+        conn.sock = ssock
+        conn.request('GET', req_path, headers=req_headers)
+        resp = conn.getresponse()
 
-            if resp.status in (200, 206):
-                downloaded = 0
-                start_t = time.time()
-                while time.time() - start_t < duration:
-                    chunk = resp.read(64 * 1024)
-                    if not chunk:
-                        break
-                    downloaded += len(chunk)
-                elapsed = time.time() - start_t
-                conn.close()
-                if elapsed > 0 and downloaded > 0:
-                    speed_mb = (downloaded / (1024 * 1024)) / elapsed
-                    speed_mb = round(speed_mb, 2)
+        if resp.status in (200, 206):
+            downloaded = 0
+            start_t = time.time()
+            while time.time() - start_t < duration:
+                chunk = resp.read(64 * 1024)
+                if not chunk:
+                    break
+                downloaded += len(chunk)
+            elapsed = time.time() - start_t
+            conn.close()
+            if elapsed > 0 and downloaded > 0:
+                speed_mb = (downloaded / (1024 * 1024)) / elapsed
+                speed_mb = round(speed_mb, 2)
+                status = "ok"
             else:
-                conn.close()
+                status = "timeout"
+        else:
+            status = f"http_{resp.status}"
+            conn.close()
+    except socket.timeout:
+        status = "timeout"
+    except socket.gaierror:
+        status = "dns"
+    except (ssl.SSLError, ConnectionResetError, ConnectionRefusedError, OSError) as exc:
+        status = "tls" if isinstance(exc, ssl.SSLError) else "connect"
     except Exception:
-        pass
+        status = "other"
 
     if speed_mb <= 0.0 and e2e is None and not (domain.replace('.', '').isdigit() or ':' in domain):
         try:
@@ -478,15 +494,23 @@ def test_download_speed_single(item, duration=2.5, e2e=None):
             elapsed = time.time() - start_t
             if elapsed > 0 and downloaded > 0:
                 speed_mb = round((downloaded / (1024 * 1024)) / elapsed, 2)
+                status = "ok"
         except Exception:
             pass
 
     if speed_mb > 0.0:
         print(f"[下载测速] {domain:<32} -> {speed_mb:5.2f} MB/s (延迟: {avg:5.1f}ms)")
-        return (speed_mb, avg, domain)
-    else:
-        print(f"[下载测速] {domain:<32} ->  0.00 MB/s (测速无响应)")
-        return (0.0, avg, domain)
+        return (speed_mb, avg, domain, "ok")
+
+    reason_map = {
+        "timeout": "连接/下载超时",
+        "tls": "TLS握手失败(SNI不匹配)",
+        "connect": "连接被拒/重置",
+        "dns": "域名解析失败",
+    }
+    reason = reason_map.get(status, f"HTTP {status[5:]}" if status.startswith("http_") else "无响应")
+    print(f"[下载测速] {domain:<32} ->  0.00 MB/s ({reason})")
+    return (0.0, avg, domain, status)
 
 
 # ================= youxuanIP-analysis 核心算法与格式生成 =================
@@ -786,27 +810,77 @@ def main():
 
     # 3. 阶段二：真实下载测速
     final_results = []
+    failed_results = []  # (avg, domain, status) 带宽未测出的节点，保留用于兜底与归因
     dl_duration = 8.0 if e2e_target else 2.5
     with concurrent.futures.ThreadPoolExecutor(max_workers=download_workers) as executor:
         futures = [executor.submit(test_download_speed_single, item, dl_duration, e2e_target) for item in top_candidates]
         for future in concurrent.futures.as_completed(futures):
-            speed, avg, domain = future.result()
+            speed, avg, domain, status = future.result()
             if speed > 0.0:
                 final_results.append((speed, avg, domain))
+            else:
+                failed_results.append((avg, domain, status))
+
+    e2e_ok = {d for _, _, d in final_results}
+    patched = set()  # 端到端失败后用官方测速文件补测成功的节点
+
+    # 端到端模式成功率过低时（如晚高峰回源慢/大面积握手失败），自动用官方测速文件补测一轮，
+    # 保证输出仍有足够多的候选节点可用，不至于只出 1 个结果
+    if e2e_target and len(final_results) < 5:
+        retry_pool = [it for it in top_candidates if it[1] not in e2e_ok]
+        print(f"\n ⚠️ 端到端测速仅 {len(final_results)} 个节点成功（回源链路不佳或网络波动），"
+              f"自动改用 Cloudflare 官方测速文件补测 {len(retry_pool)} 个候选......")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=download_workers) as executor:
+            futures = [executor.submit(test_download_speed_single, it, 2.5, None) for it in retry_pool]
+            for future in concurrent.futures.as_completed(futures):
+                speed, avg, domain, status = future.result()
+                if speed > 0.0:
+                    final_results.append((speed, avg, domain))
+                    patched.add(domain)
+                else:
+                    failed_results.append((avg, domain, status))
 
     if not final_results:
         print("\n[!] 提示: 本轮未测得有效下载带宽节点，可能是晚高峰网络波动，建议稍后重试。")
         return
 
+    # 兜底候选：Ping 通过但带宽未测出的节点（按域名去重，取最优延迟），按延迟升序备用
+    ok_domains = {d for _, _, d in final_results}
+    backup_map = {}
+    for avg, domain, _ in failed_results:
+        if domain not in ok_domains and (domain not in backup_map or avg < backup_map[domain]):
+            backup_map[domain] = avg
+    backup_candidates = sorted(((avg, d) for d, avg in backup_map.items()), key=lambda x: x[0])[:8]
+
     # 4. youxuanIP-analysis 智能分类
     best_list, bandwidth_list, latency_list = run_youxuan_analysis(final_results)
 
-    # 5. 详细数据表格视图
+    # 5. 详细数据表格视图（端到端标 ★，官方补测标 †）
     print("\n" + "=" * 60)
     print(f" 📊 测速结果详细数据 (已为你精选出 {len(final_results)} 个高速节点):")
     print("=" * 60)
     for speed, avg, domain in sorted(final_results, key=lambda x: (-x[0], x[1])):
-        print(f"  {domain:<35} | 带宽: {speed:5.2f} MB/s | 延迟: {avg:5.1f} ms")
+        tag = " ★端到端" if domain in e2e_ok else (" †官方补测" if domain in patched else "")
+        print(f"  {domain:<35} | 带宽: {speed:5.2f} MB/s | 延迟: {avg:5.1f} ms{tag}")
+    if e2e_target:
+        print("  (★ = 完整链路实测；† = 回源补测，仅代表 手机→CF 段速度)")
+
+    # 失败原因归因统计（按域名去重，取最后一次失败原因）
+    if failed_results:
+        last_fail = {}
+        for _, domain, st in failed_results:
+            last_fail[domain] = st
+        stat = {}
+        for st in last_fail.values():
+            stat[st] = stat.get(st, 0) + 1
+        reason_map = {
+            "timeout": "连接/下载超时",
+            "tls": "TLS握手失败(SNI不匹配)",
+            "connect": "连接被拒/重置",
+            "dns": "域名解析失败",
+        }
+        parts = [f"{reason_map.get(k, 'HTTP ' + k[5:] if k.startswith('http_') else k)} x{v}" for k, v in stat.items()]
+        print(f"\n 📉 未测出带宽 {len(last_fail)} 个节点归因: {'; '.join(parts)}")
 
     # 6. youxuanIP-analysis 标准纯文本输出
     skill_output_text = format_skill_output(best_list, bandwidth_list, latency_list)
@@ -814,6 +888,12 @@ def main():
     print("\n" + "=" * 60)
     print(skill_output_text)
     print("=" * 60)
+
+    # 兜底输出：带宽未测出但 Ping 通过的备用候选，避免结果只有一两个不够用
+    if backup_candidates:
+        print("\n ➕ 备用候选 (Ping 通过但带宽未测出，可填入客户端手动验证):")
+        for _, bk_domain in backup_candidates:
+            print(f"  {bk_domain}")
 
     # 自动写入剪贴板（Termux:API）
     if try_copy_to_clipboard(skill_output_text):
@@ -832,8 +912,17 @@ def main():
     for s, a, d in latency_list:
         out_lines.append(f"{s:.2f} MB/s | {a:.1f} ms : {d}\n")
 
+    if backup_candidates:
+        out_lines.append("\n四、备用候选 (Ping通过但带宽未测出，可手动验证)\n")
+        for a, d in backup_candidates:
+            out_lines.append(f"未测速 | {a:.1f} ms : {d}\n")
+
     with open(current_out, "w", encoding="utf-8") as f:
         f.writelines(out_lines)
+
+    if backup_candidates:
+        skill_output_text += "\n四、备用候选 (Ping通过但带宽未测出，可手动验证)\n\n" + \
+            "\n".join(d for _, d in backup_candidates) + "\n"
 
     with open(current_clean_out, "w", encoding="utf-8") as f:
         f.write(skill_output_text + "\n")
